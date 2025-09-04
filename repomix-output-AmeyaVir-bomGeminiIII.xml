@@ -1,0 +1,4675 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+The content has been processed where security check has been disabled.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Security check has been disabled - content may contain sensitive information
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+backend/
+  services/
+    __init__.py
+    document_parser.py
+    gemini_agent_service_backup.py
+    gemini_agent_service.py
+    knowledge_base_service.py
+    translation_service.py
+    workflow_service_backup.py
+    workflow_service.py
+  main_backup.py
+  main.py
+  models_backup.py
+  models.py
+  requirements.txt
+frontend/
+  public/
+    index.html
+    index.htmlZone.Identifier
+  src/
+    components/
+      ui/
+        Button.jsx
+        Card.jsx
+        LoadingSpinner.jsx
+      Dashboard.jsx
+      KnowledgeBase.jsx
+      LanguageSelector.jsx
+      Layout.jsx
+      ProcessingPage.jsx
+      Results.jsx
+      SettingsPage.jsx
+      Upload.jsx
+    contexts/
+      TranslationContext.jsx
+    services/
+      TranslationService.js
+    App.jsx
+    index.css
+    index.js
+  package.json
+  tailwind.config.js
+README.md
+setup.sh
+start_backend.sh
+start_frontend.sh
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="backend/services/__init__.py">
+# Services package
+</file>
+
+<file path="backend/services/document_parser.py">
+import pandas as pd
+from docx import Document as DocxDocument
+from PyPDF2 import PdfReader
+import logging
+import os
+import json
+from typing import Optional
+from dotenv import load_dotenv
+import openpyxl
+
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class DocumentParser:
+    """
+    A service for extracting and parsing content from various document types.
+    It's designed to be a standalone utility class that does not hold references to other services.
+    """
+
+    def extract_text(self, file_path: str) -> str:
+        """
+        Extracts raw text content from PDF, DOCX, TXT, and CSV files, including tables.
+        
+        Args:
+            file_path: The path to the document file.
+
+        Returns:
+            The extracted text as a single string.
+        """
+        _, file_extension = os.path.splitext(file_path.lower())
+        text = ""
+
+        if file_extension == '.pdf':
+            try:
+                reader = PdfReader(file_path)
+                for page in reader.pages:
+                    text += page.extract_text() + "\n"
+            except Exception as e:
+                logging.error(f"Failed to extract text from PDF file: {e}")
+        
+        elif file_extension == '.docx':
+            try:
+                doc = DocxDocument(file_path)
+                for paragraph in doc.paragraphs:
+                    text += paragraph.text + "\n"
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            text += cell.text + " | "
+                        text += "\n"
+            except Exception as e:
+                logging.error(f"Failed to extract text from DOCX file: {e}")
+        
+        elif file_extension == '.txt':
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+            except Exception as e:
+                logging.error(f"Failed to read TXT file: {e}")
+
+        elif file_extension == '.csv':
+            try:
+                # Read as a DataFrame and convert to string for consistent LLM input
+                df = pd.read_csv(file_path, encoding='utf-8')
+                text = df.to_string()
+            except Exception as e:
+                logging.error(f"Failed to read CSV file: {e}")
+        
+        else:
+            raise ValueError(f"Unsupported file type: {file_extension}")
+        
+        return text
+
+    def parse_item_master(self, file_path: str, gemini_service) -> list:
+        """
+        Parses item master content from a CSV or Excel file and standardizes
+        column names using an LLM API call. The gemini_service is passed here
+        at call time, not during initialization, to avoid a circular dependency.
+        
+        Args:
+            file_path: The path to the item master file.
+            gemini_service: The GeminiAgentService instance.
+            
+        Returns:
+            A list of dictionaries with standardized column names.
+        """
+        try:
+            _, file_extension = os.path.splitext(file_path.lower())
+            
+            if file_extension == '.csv':
+                df = pd.read_csv(file_path, encoding='utf-8')
+            elif file_extension in ['.xlsx', '.xls']:
+                df = pd.read_excel(file_path, engine='openpyxl')
+            else:
+                raise ValueError(f"Unsupported file type for item master: {file_extension}")
+            
+            # Use LLM to map columns to standard ones
+            csv_content = df.to_csv(index=False)
+            logging.info("Calling LLM to standardize item master columns...")
+            standardized_data = gemini_service.standardize_item_master(csv_content)
+            
+            return standardized_data
+        except Exception as e:
+            logging.error(f"Error parsing item master file with LLM: {e}")
+            return []
+</file>
+
+<file path="backend/services/gemini_agent_service_backup.py">
+import google.generativeai as genai
+import os
+import json
+from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class GeminiAgentService:
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set.")
+        genai.configure(api_key=self.api_key)
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    def extract_all_items(self, document_content: str) -> list:
+        """
+        Uses the LLM to extract a raw list of all potential auxiliary items from the document.
+        Returns a single, valid JSON array of objects.
+        """
+        user_prompt = f"""
+        Analyze the following document content and extract a raw list of all auxiliary items (consumables, jigs, tools) mentioned.
+        For each item, identify its material_name, part_number, qty, uom, and vendor_name.
+        If a detail is not explicitly mentioned, return a blank string for that field.
+        The output must be a single, valid JSON array of objects, with each object containing all of the required keys. Do not include any other text or formatting.
+        
+        Document Content:
+        {document_content}
+        """
+        try:
+            response = self.model.generate_content(
+                user_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                )
+            )
+            # Ensure the response is a valid JSON array
+            raw_data = json.loads(response.text)
+            if isinstance(raw_data, list):
+                return raw_data
+            else:
+                return []
+        except Exception as e:
+            print(f"Error calling Gemini API for item extraction: {e}")
+            return []
+
+    def check_for_match(self, text_to_search: str, item_name: str, part_number: Optional[str] = None) -> bool:
+        """
+        Uses the LLM to check for a specific item name or part number match within a block of text.
+        Returns True if a match is found, False otherwise.
+        """
+        user_prompt = f"""
+        Does the following document text contain a reference to the item name "{item_name}"?
+        The part number "{part_number}" might also be used.
+        Respond with only 'True' or 'False'. Do not include any other text.
+
+        Document text:
+        {text_to_search}
+        """
+        try:
+            response = self.model.generate_content(user_prompt)
+            return response.text.strip().lower() == 'true'
+        except Exception as e:
+            print(f"Error calling Gemini API for match check: {e}")
+            return False
+
+    def extract_details(self, document_content: str, item_name: str) -> dict:
+        """
+        Uses the LLM to extract specific details like quantity and UoM for a given item name.
+        """
+        user_prompt = f"""
+        From the following document content, extract the quantity (qty) and unit of measure (uom) for the item named "{item_name}".
+        If a detail is not found, use a blank string.
+        The output must be a valid JSON object with the keys "qty" and "uom".
+
+        Document Content:
+        {document_content}
+        """
+        try:
+            response = self.model.generate_content(
+                user_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                )
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Error calling Gemini API for detail extraction: {e}")
+            return {'qty': '', 'uom': ''}
+            
+    def standardize_item_master(self, csv_content: str) -> list:
+        """
+        Uses LLM to standardize column headers in a CSV string to a predefined format.
+        """
+        standard_columns = ["material_name", "part_number", "description", "vendor_name", "uom"]
+        prompt = f"""
+        Given the following CSV content, standardize the column names to match a predefined list.
+        Map any equivalent columns (e.g., 'Item Code' to 'part_number'). If a column has no equivalent, ignore it.
+        The output must be a single, valid JSON array of objects, with each object containing the standardized keys.
+        
+        Standard Columns: {standard_columns}
+        
+        CSV Content:
+        {csv_content}
+        
+        Standardized JSON Array:
+        """
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                )
+            )
+            standardized_data = json.loads(response.text)
+            if isinstance(standardized_data, list):
+                return standardized_data
+            else:
+                return []
+        except Exception as e:
+            print(f"Error standardizing item master with LLM: {e}")
+            return []
+</file>
+
+<file path="backend/services/gemini_agent_service.py">
+import os
+import json
+import requests
+from typing import Optional, List, Dict
+from dotenv import load_dotenv
+import re
+
+load_dotenv()
+
+class GeminiAgentService:
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set.")
+        
+        self.url = os.getenv("GEMINI_API_URL", "https://api.ai-gateway.tigeranalytics.com/chat/completions")
+        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+    def _extract_json_from_markdown(self, text: str) -> str:
+        """
+        Extracts a JSON string from a Markdown code block.
+        Returns an empty string if no JSON code block is found.
+        """
+        match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if match:
+            return match.group(1)
+        return text
+
+    def _call_api(self, prompt: str, response_mime_type: Optional[str] = None, temperature: float = 0.2) -> requests.Response:
+        """
+        Internal helper to make a call to the external Gemini API gateway.
+        """
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature
+        }
+        
+        # Pass response_mime_type in a nested generationConfig as per the API's documentation
+        if response_mime_type:
+            payload["generationConfig"] = {"responseMimeType": response_mime_type}
+
+        try:
+            response = requests.post(self.url, headers=self.headers, data=json.dumps(payload))
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"API call failed: {e}")
+
+    def extract_all_items(self, document_content: str) -> list:
+        """
+        Uses the LLM to extract a raw list of all potential auxiliary items from the document.
+        Returns a single, valid JSON array of objects.
+        """
+        user_prompt = f"""
+        Analyze the following document content and extract a raw list of all auxiliary items (consumables, jigs, tools) mentioned.
+        For each item, identify its material_name, part_number, qty, uom, and vendor_name.
+        If a detail is not explicitly mentioned, return a blank string for that field.
+        The output must be a single, valid JSON array of objects, with each object containing all of the required keys. Do not include any other text or formatting.
+        
+        Document Content:
+        {document_content}
+        """
+        try:
+            response = self._call_api(user_prompt, response_mime_type="application/json")
+            raw_data = response.json()
+            if 'choices' not in raw_data or not raw_data['choices']:
+                print(f"API response missing 'choices': {raw_data}")
+                return []
+            extracted_text = raw_data['choices'][0]['message']['content']
+            
+            # Extract JSON string from markdown and then load it
+            json_string = self._extract_json_from_markdown(extracted_text)
+            parsed_data = json.loads(json_string)
+            if isinstance(parsed_data, list):
+                return parsed_data
+            else:
+                return []
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON response from API: {e}")
+            print(f"Raw API Response: {response.text}")
+            return []
+        except Exception as e:
+            print(f"Error calling Gemini API for item extraction: {e}")
+            return []
+
+    def check_for_match(self, text_to_search: str, item_name: str, part_number: Optional[str] = None) -> bool:
+        """
+        Uses the LLM to check for a specific item name or part number match within a block of text.
+        Returns True if a match is found, False otherwise.
+        """
+        user_prompt = f"""
+        Does the following document text contain a reference to the item name "{item_name}"?
+        The part number "{part_number}" might also be used.
+        Respond with only 'True' or 'False'. Do not include any other text.
+
+        Document text:
+        {text_to_search}
+        """
+        try:
+            response = self._call_api(user_prompt)
+            if 'choices' not in response.json() or not response.json()['choices']:
+                print(f"API response missing 'choices': {response.text}")
+                return False
+            extracted_text = response.json()['choices'][0]['message']['content']
+            return extracted_text.strip().lower() == 'true'
+        except Exception as e:
+            print(f"Error calling Gemini API for match check: {e}")
+            return False
+
+    def extract_details(self, document_content: str, item_name: str) -> dict:
+        """
+        Uses the LLM to extract specific details like quantity and UoM for a given item name.
+        """
+        user_prompt = f"""
+        From the following document content, extract the quantity (qty) and unit of measure (uom) for the item named "{item_name}".
+        If a detail is not found, use a blank string.
+        The output must be a valid JSON object with the keys "qty" and "uom".
+
+        Document Content:
+        {document_content}
+        """
+        try:
+            response = self._call_api(user_prompt, response_mime_type="application/json")
+            if 'choices' not in response.json() or not response.json()['choices']:
+                print(f"API response missing 'choices': {response.text}")
+                return {'qty': '', 'uom': ''}
+            extracted_text = response.json()['choices'][0]['message']['content']
+
+            # Extract JSON string from markdown and then load it
+            json_string = self._extract_json_from_markdown(extracted_text)
+            return json.loads(json_string)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON response from API: {e}")
+            print(f"Raw API Response: {response.text}")
+            return {'qty': '', 'uom': ''}
+        except Exception as e:
+            print(f"Error calling Gemini API for detail extraction: {e}")
+            return {'qty': '', 'uom': ''}
+            
+    def standardize_item_master(self, csv_content: str) -> list:
+        """
+        Uses LLM to standardize column headers in a CSV string to a predefined format.
+        """
+        standard_columns = ["material_name", "part_number", "description", "vendor_name", "uom"]
+        prompt = f"""
+        Given the following CSV content, standardize the column names to match a predefined list.
+        Map any equivalent columns (e.g., 'Item Code' to 'part_number'). If a column has no equivalent, ignore it.
+        The output must be a single, valid JSON array of objects, with each object containing the standardized keys.
+        
+        Standard Columns: {standard_columns}
+        
+        CSV Content:
+        {csv_content}
+        
+        Standardized JSON Array:
+        """
+        try:
+            response = self._call_api(prompt, response_mime_type="application/json")
+            if 'choices' not in response.json() or not response.json()['choices']:
+                print(f"API response missing 'choices': {response.text}")
+                return []
+            extracted_text = response.json()['choices'][0]['message']['content']
+
+            # Extract JSON string from markdown and then load it
+            json_string = self._extract_json_from_markdown(extracted_text)
+            standardized_data = json.loads(json_string)
+            if isinstance(standardized_data, list):
+                return standardized_data
+            else:
+                return []
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON response from API: {e}")
+            print(f"Raw API Response: {response.text}")
+            return []
+        except Exception as e:
+            print(f"Error standardizing item master with LLM: {e}")
+            return []
+            
+    def find_best_match(self, extracted_item: Dict, kb_items: List[Dict]) -> Optional[Dict]:
+        """
+        Uses the LLM to find the best matching item from a list of knowledge base items,
+        considering fuzzy part number, semantic material name, and other metadata.
+        
+        Args:
+            extracted_item: The item extracted from the new document.
+            kb_items: A list of candidate items from the knowledge base.
+            
+        Returns:
+            The best matching knowledge base item with a confidence score, or None.
+        """
+        
+        prompt = f"""
+        You are a highly accurate inventory matching agent. Your task is to find the single best match from a list of candidate items for a new item.
+        
+        The new item to match is:
+        - Part Number: {extracted_item.get('part_number', 'N/A')}
+        - Material Name: {extracted_item.get('material_name', 'N/A')}
+        - Description: {extracted_item.get('description', 'N/A')}
+        - Vendor Name: {extracted_item.get('vendor_name', 'N/A')}
+        
+        The list of candidate items from the knowledge base is:
+        {json.dumps(kb_items, indent=2)}
+        
+        Rules for matching:
+        1. Prioritize an exact or very close fuzzy match on 'part_number'.
+        2. If part numbers are not a strong match, use 'material_name' and 'description' to find a strong semantic match.
+        3. 'vendor_name' is an important secondary piece of information for confirmation.
+        4. If a strong match is found, return the full details of the best matching item from the list.
+        5. If no confident match (e.g., more than one ambiguous match or no match at all) is found, return an empty JSON object.
+        6. The response must be a single, valid JSON object and nothing else. Do not include any explanation or additional text.
+        
+        Best matching item (or an empty object if no confident match):
+        """
+        
+        try:
+            response = self._call_api(prompt, response_mime_type="application/json", temperature=0.1)
+            extracted_text = response.json()['choices'][0]['message']['content']
+            json_string = self._extract_json_from_markdown(extracted_text)
+            match_data = json.loads(json_string)
+            
+            # The LLM is instructed to return an empty object if no match.
+            # We add a confidence score here based on LLM output.
+            if match_data:
+                match_data['confidence_score'] = 0.8
+                return match_data
+            return None
+        
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON response from API: {e}")
+            print(f"Raw API Response: {response.text}")
+            return None
+        except Exception as e:
+            print(f"Error calling Gemini API for match check: {e}")
+            return None
+</file>
+
+<file path="backend/services/knowledge_base_service.py">
+import json
+import logging
+from typing import List, Dict, Optional
+from models import KnowledgeBaseModel, PendingApprovalModel
+from services.gemini_agent_service import GeminiAgentService
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class KnowledgeBaseService:
+    def __init__(self, gemini_service: Optional[GeminiAgentService] = None):
+        self.gemini_service = gemini_service or GeminiAgentService()
+
+    def get_items(self, search_query='', limit=50):
+        """Get knowledge base items"""
+        return KnowledgeBaseModel.search_items(search_query, limit)
+    
+    def get_stats(self):
+        """Get knowledge base statistics"""
+        return KnowledgeBaseModel.get_stats()
+    
+    def get_pending_approvals(self, workflow_id=None):
+        """Get pending approval items"""
+        pending_items = PendingApprovalModel.get_pending_items(workflow_id)
+        
+        for item in pending_items:
+            try:
+                item['parsed_data'] = json.loads(item['item_data'])
+            except:
+                item['parsed_data'] = {}
+        
+        return pending_items
+    
+    def approve_items(self, workflow_id, item_ids):
+        """Approve items for knowledge base"""
+        pending_items_to_approve = [item for item in PendingApprovalModel.get_pending_items(workflow_id) if item['id'] in item_ids]
+        
+        approved_count = 0
+        
+        for item in pending_items_to_approve:
+            try:
+                item_data = json.loads(item['item_data'])
+                
+                KnowledgeBaseModel.add_item(
+                    material_name=item_data.get('material_name'),
+                    part_number=item_data.get('part_number'),
+                    description=item_data.get('supplier_description'),
+                    classification_label=item_data.get('qa_classification_label'),
+                    confidence_level=item_data.get('qa_confidence_level'),
+                    supplier_info=json.dumps({
+                        'vendor_name': item_data.get('vendor_name', ''),
+                        'match_source': item_data.get('match_source', ''),
+                        'supplier_part_number': item_data.get('supplier_part_number', '')
+                    }),
+                    workflow_id=workflow_id,
+                    approved_by='system',
+                    metadata=json.dumps(item_data)
+                )
+                approved_count += 1
+            except Exception as e:
+                print(f"Error approving item {item['id']}: {str(e)}")
+        
+        PendingApprovalModel.update_approval_status(
+            item_ids, 'approved', 'system', 'Approved for knowledge base'
+        )
+        
+        return approved_count
+    
+    def reject_items(self, workflow_id, item_ids):
+        """Reject items for knowledge base"""
+        PendingApprovalModel.update_approval_status(
+            item_ids, 'rejected', 'system', 'Rejected from knowledge base'
+        )
+        return len(item_ids)
+
+    def search_for_matches(self, extracted_items: List[Dict]) -> List[Dict]:
+        """
+        Searches the knowledge base for matches to extracted items using LLM-based hybrid search.
+        
+        Args:
+            extracted_items: A list of items extracted from a new document.
+            
+        Returns:
+            A list of dictionaries, where each dictionary contains the original item and its best match (if found).
+        """
+        results = []
+        # Fetch all knowledge base items to use as candidates
+        kb_items = self.get_items(limit=1000)
+        
+        for item in extracted_items:
+            # Use the LLM to find the best match based on all available metadata.
+            # We pass a limited number of KB items to the LLM to manage context window size.
+            # In a production system, a preliminary filter (e.g., by vendor) could be applied.
+            best_match = self.gemini_service.find_best_match(
+                extracted_item=item,
+                kb_items=kb_items
+            )
+
+            if best_match:
+                # If a match is found, add the relevant information to the result.
+                results.append({
+                    'original_item': item,
+                    'kb_match': best_match
+                })
+            else:
+                # No confident match found by the LLM.
+                results.append({
+                    'original_item': item,
+                    'kb_match': None
+                })
+        return results
+</file>
+
+<file path="backend/services/translation_service.py">
+import os
+import json
+import requests
+from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class TranslationService:
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set.")
+        
+        self.url = os.getenv("GEMINI_API_URL", "https://api.ai-gateway.tigeranalytics.com/chat/completions")
+        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+    def _call_api(self, prompt: str) -> requests.Response:
+        """
+        Internal helper to make a call to the external Gemini API gateway for translation.
+        """
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        
+        try:
+            response = requests.post(self.url, headers=self.headers, data=json.dumps(payload))
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"API call failed: {e}")
+
+    def translate_to_english(self, text: str) -> str:
+        """Translates Japanese text to English using Gemini API."""
+        prompt = f"""
+        Translate the following text from Japanese to English. Maintain all original formatting, including line breaks and tables.
+        
+        Japanese Text:
+        {text}
+        
+        English Translation:
+        """
+        try:
+            response = self._call_api(prompt)
+            extracted_text = response.json()['choices'][0]['message']['content']
+            return extracted_text
+        except Exception as e:
+            print(f"Error calling Gemini API for translation: {e}")
+            return text
+</file>
+
+<file path="backend/services/workflow_service_backup.py">
+import os
+import json
+import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+import pandas as pd
+import logging
+from typing import Optional
+import uuid
+
+from models import WorkflowModel, PendingApprovalModel
+from services.translation_service import TranslationService
+from services.gemini_agent_service import GeminiAgentService
+from services.knowledge_base_service import KnowledgeBaseService
+from services.document_parser import DocumentParser
+
+executor = ThreadPoolExecutor(max_workers=4)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class WorkflowService:
+    def __init__(self):
+        self.upload_dir = 'uploads'
+        self.results_dir = 'results'
+        self.translation_service = TranslationService()
+        self.gemini_service = GeminiAgentService()
+        self.kb_service = KnowledgeBaseService()
+        self.doc_parser = DocumentParser()
+
+    def start_workflow(self, workflow_id, wi_document, item_master=None, comparison_mode='full'):
+        try:
+            workflow_dir = os.path.join(self.upload_dir, workflow_id)
+            os.makedirs(workflow_dir, exist_ok=True)
+            
+            wi_path = os.path.join(workflow_dir, wi_document.filename)
+            with open(wi_path, "wb") as buffer:
+                shutil.copyfileobj(wi_document.file, buffer)
+            
+            item_path = None
+            if item_master:
+                item_path = os.path.join(workflow_dir, item_master.filename)
+                with open(item_path, "wb") as buffer:
+                    shutil.copyfileobj(item_master.file, buffer)
+            
+            WorkflowModel.create_workflow(workflow_id, comparison_mode, wi_path, item_path)
+            executor.submit(self._process_workflow_async, workflow_id, wi_path, item_path, comparison_mode)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to start workflow: {str(e)}")
+
+    def _apply_classification_logic(self, item, item_master_items_pn_set, item_master_items_name_set):
+        pn_match = item.get('part_number') and item.get('part_number') in item_master_items_pn_set
+        name_match = item.get('material_name') and item.get('material_name') in item_master_items_name_set
+        qty_present = item.get('qty') is not None and item.get('qty') != ''
+        
+        item['qa_classification_label'] = '5'
+        item['qa_confidence_level'] = 'low'
+        item['reasoning'] = 'No match found'
+        item['action_path'] = '🔴 Human Intervention Required'
+        
+        # Rule 1: Consumable/Jigs/Tools + PN + Qty
+        if pn_match and qty_present:
+            item.update({
+                'qa_classification_label': '1',
+                'qa_confidence_level': 'high',
+                'reasoning': 'Match to BOM & Item Master Data',
+                'action_path': '🟢 Auto-Register'
+            })
+        # Rule 4: Consumable/Jigs/Tools (no Part Number)
+        elif not pn_match and name_match:
+            item.update({
+                'qa_classification_label': '4',
+                'qa_confidence_level': 'low',
+                'reasoning': 'Check for text match in master data',
+                'action_path': '🔴 Human Intervention Required'
+            })
+        
+        return item
+
+    def _extract_and_classify_items(self, wi_content: str, item_master_items: list):
+        classified_items = []
+        raw_items = self.gemini_service.extract_all_items(wi_content)
+        
+        item_master_items_pn_set = {item['part_number'] for item in item_master_items if item.get('part_number')}
+        item_master_items_name_set = {item['material_name'] for item in item_master_items if item.get('material_name')}
+        
+        for item in raw_items:
+            classified_item = self._apply_classification_logic(item, item_master_items_pn_set, item_master_items_name_set)
+            classified_items.append(classified_item)
+            
+        return classified_items
+    
+    def _process_workflow_async(self, workflow_id, wi_path, item_path, comparison_mode):
+        try:
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'processing', progress=10, 
+                stage='extracting', message='Extracting data from documents'
+            )
+            
+            wi_content = self.doc_parser.extract_text(wi_path)
+            item_master_items = self.doc_parser.parse_item_master(item_path) if item_path else []
+            
+            logging.info(f"Workflow {workflow_id}: Document content extracted.")
+            logging.info(f"Extracted WI Content:\n{wi_content}")
+            logging.info(f"Extracted Item Master Content:\n{item_master_items}")
+
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'processing', progress=30, 
+                stage='translating', message='Translating document to English'
+            )
+            
+            translated_wi_content = self.translation_service.translate_to_english(wi_content)
+            logging.info(f"Workflow {workflow_id}: Document translated. Logged to results.")
+            logging.info(f"Translated Content:\n{translated_wi_content}")
+
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'processing', progress=50, 
+                stage='classifying', message='Classifying and matching items with Gemini'
+            )
+
+            item_master_items = self.doc_parser.parse_item_master(item_path) if item_path else []
+            extracted_items = self._extract_and_classify_items(translated_wi_content, item_master_items)
+            
+            logging.info(f"Workflow {workflow_id}: Gemini agent completed. Extracted {len(extracted_items)} items.")
+            logging.info(f"Extracted Items:\n{extracted_items}")
+            
+            summary = self._generate_summary(extracted_items, comparison_mode)
+            self._save_workflow_results(workflow_id, extracted_items, summary)
+            self._create_pending_approvals(workflow_id, extracted_items)
+            
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'completed', progress=100, 
+                stage='completed', message='Processing completed successfully'
+            )
+            
+        except Exception as e:
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'error', message=f'Processing failed: {str(e)}'
+            )
+            logging.error(f"Workflow {workflow_id} failed with error: {e}")
+
+    def _extract_text_from_document(self, file_path):
+        return self.doc_parser.extract_text(file_path)
+
+    def _extract_text_from_excel(self, file_path):
+        return self.doc_parser.extract_text(file_path)
+
+    def _generate_summary(self, items, comparison_mode):
+        if not isinstance(items, list):
+            return {
+                'total_materials': 0,
+                'successful_matches': 0,
+                'knowledge_base_matches': 0,
+                'comparison_mode': comparison_mode
+            }
+        
+        total_materials = len(items)
+        successful_matches = sum(1 for item in items if isinstance(item, dict) and item.get('qa_confidence_level') in ['high', 'medium'])
+        knowledge_base_matches = sum(1 for item in items if isinstance(item, dict) and 'knowledge_base' in item.get('reasoning', '').lower())
+        
+        return {
+            'total_materials': total_materials,
+            'successful_matches': successful_matches,
+            'knowledge_base_matches': knowledge_base_matches,
+            'comparison_mode': comparison_mode
+        }
+
+    def _save_workflow_results(self, workflow_id, results, summary):
+        results_file = os.path.join(self.results_dir, f'{workflow_id}.json')
+        with open(results_file, 'w') as f:
+            json.dump({'matches': results, 'summary': summary}, f, indent=2)
+        
+        from models import get_db_connection
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO workflow_results (workflow_id, results_data, summary_data)
+            VALUES (?, ?, ?)
+        ''', (workflow_id, json.dumps({'matches': results}), json.dumps(summary)))
+        conn.commit()
+        conn.close()
+    
+    def _create_pending_approvals(self, workflow_id, matches):
+        for match in matches:
+            if isinstance(match, dict) and match.get('qa_confidence_level') in ['low','high', 'medium']:
+                PendingApprovalModel.add_pending_item(workflow_id, json.dumps(match))
+    
+    def get_workflow_status(self, workflow_id):
+        workflow = WorkflowModel.get_workflow(workflow_id)
+        if not workflow:
+            raise ValueError("Workflow not found")
+        return workflow
+    
+    def get_workflow_results(self, workflow_id):
+        results_file = os.path.join(self.results_dir, f'{workflow_id}.json')
+        if not os.path.exists(results_file):
+            raise ValueError("Results not found")
+        
+        with open(results_file, 'r') as f:
+            return json.load(f)
+    
+    def get_all_workflows(self):
+        workflows = WorkflowModel.get_all_workflows()
+        
+        for workflow in workflows:
+            results_file = os.path.join(self.results_dir, f"{workflow['id']}.json")
+            workflow['has_results'] = os.path.exists(results_file)
+        
+        return workflows
+</file>
+
+<file path="backend/services/workflow_service.py">
+import os
+import json
+import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+import logging
+from typing import Optional
+import uuid
+
+# Import all services and models
+from models import WorkflowModel, PendingApprovalModel
+from services.translation_service import TranslationService
+from services.gemini_agent_service import GeminiAgentService
+from services.knowledge_base_service import KnowledgeBaseService
+from services.document_parser import DocumentParser
+
+executor = ThreadPoolExecutor(max_workers=4)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class WorkflowService:
+    """
+    Main service for orchestrating the BOM processing workflow.
+    It handles file uploads, document processing, data classification, and results storage.
+    """
+    def __init__(self):
+        self.upload_dir = 'uploads'
+        self.results_dir = 'results'
+        self.translation_service = TranslationService()
+        self.gemini_service = GeminiAgentService()
+        self.kb_service = KnowledgeBaseService(gemini_service=self.gemini_service)
+        self.doc_parser = DocumentParser()
+
+    def start_workflow(self, workflow_id, wi_document, item_master=None, comparison_mode='full'):
+        """
+        Initializes and starts an asynchronous workflow.
+        """
+        try:
+            workflow_dir = os.path.join(self.upload_dir, workflow_id)
+            os.makedirs(workflow_dir, exist_ok=True)
+            
+            wi_path = os.path.join(workflow_dir, wi_document.filename)
+            with open(wi_path, "wb") as buffer:
+                shutil.copyfileobj(wi_document.file, buffer)
+            
+            item_path = None
+            if item_master:
+                item_path = os.path.join(workflow_dir, item_master.filename)
+                with open(item_path, "wb") as buffer:
+                    shutil.copyfileobj(item_master.file, buffer)
+            
+            WorkflowModel.create_workflow(workflow_id, comparison_mode, wi_path, item_path)
+            executor.submit(self._process_workflow_async, workflow_id, wi_path, item_path, comparison_mode)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to start workflow: {str(e)}")
+
+    def _apply_classification_logic(self, item, item_master_items: list):
+        """
+        Applies a comprehensive set of 13 classification rules to a single item.
+        This function determines the item's confidence level, classification label,
+        reasoning, and action path based on a hierarchy of checks.
+        
+        The rules are applied in a specific order, from highest confidence to lowest.
+        """
+        # Define helper functions to simulate logical checks
+        def _is_item_in_master(item_to_check, master_items):
+            for master_item in master_items:
+                pn_match = item_to_check.get('part_number') and master_item.get('part_number') and item_to_check['part_number'] == master_item['part_number']
+                name_match = item_to_check.get('material_name') and master_item.get('material_name') and item_to_check['material_name'] == master_item['material_name']
+                if pn_match or name_match:
+                    return True
+            return False
+
+        def _is_part_number_obsolete(pn):
+            # Placeholder: In a real system, this would query an obsolete parts database.
+            return pn == 'OBSOLETE-PN'
+            
+        def _is_name_ambiguous(name):
+            # Placeholder: In a real system, this would use an NLP model to score ambiguity.
+            return 'Ambiguous' in name or 'Vague' in name
+        
+        # Merge data from item master or knowledge base if a match is found
+        merged_items = self.kb_service.search_for_matches([item])
+        # IMPORTANT FIX: Avoid creating a circular reference by not merging the entire `kb_match` object.
+        if merged_items:
+            kb_match_data = merged_items[0].get('kb_match', {})
+            item['kb_match'] = kb_match_data
+            item['supplier_match'] = True
+        
+        # Check for key data points from the extracted item
+        has_pn = item.get('part_number') and item.get('part_number') != ''
+        has_name = item.get('material_name') and item.get('material_name') != ''
+        has_qty = item.get('qty') is not None and item.get('qty') != ''
+        has_vendor = item.get('vendor_name') and item.get('vendor_name') != ''
+        is_kit = item.get('kit_available', False)
+
+        # Check against the item master
+        pn_match_in_master = has_pn and item.get('part_number') in [i.get('part_number') for i in item_master_items]
+        name_match_in_master = has_name and item.get('material_name') in [i.get('material_name') for i in item_master_items]
+
+        # Initialize all flags and metadata with a default low-confidence state
+        item.update({
+            'pn_match': False, 'name_mismatch': False, 'pn_mismatch': False, 'obsolete_pn': False, 'vendor_name_only': False, 'kit_available': False, 'is_consumable': False,
+            'qa_classification_label': '5',
+            'qa_confidence_level': 'low',
+            'reasoning': 'No match found',
+            'action_path': '🔴 Human Intervention Required',
+            'confidence_score': 0.0,
+            'qa_material_name': item.get('material_name')
+        })
+
+        # --- Rule-Based Classification Logic (Ordered by Confidence) ---
+
+        # Rule 1: Consumable/Jigs/Tools + PN + Qty
+        if pn_match_in_master and has_qty:
+            item.update({
+                'pn_match': True,
+                'is_consumable': True,
+                'qa_classification_label': '1',
+                'qa_confidence_level': 'high',
+                'reasoning': 'Match to BOM & Item Master Data',
+                'action_path': '🟢 Auto-Register',
+                'confidence_score': 0.95
+            })
+            return item
+        
+        # Rule 2: Consumable/Jigs/Tools + PN + Spec + Qty
+        # NOTE: This rule requires an external specification check.
+        # For this implementation, we will assume a hypothetical 'spec_match' flag.
+        if pn_match_in_master and has_qty and item.get('spec_match'):
+            item.update({
+                'pn_match': True,
+                'is_consumable': True,
+                'qa_classification_label': '2',
+                'qa_confidence_level': 'high',
+                'reasoning': 'Verify process parameters match',
+                'action_path': '🟢 Auto-Register',
+                'confidence_score': 0.90
+            })
+            return item
+            
+        # Rule 3: Consumable/Jigs/Tools (no qty)
+        if pn_match_in_master and not has_qty:
+            item.update({
+                'is_consumable': True,
+                'pn_match': True,
+                'qa_classification_label': '3',
+                'qa_confidence_level': 'medium',
+                'reasoning': 'Infer qty from BOM history',
+                'action_path': '🟠 Auto w/ Flag',
+                'confidence_score': 0.70
+            })
+            return item
+
+        # Rule 9: Vendor Name Only
+        if has_vendor and not has_pn and not has_name:
+            item.update({
+                'vendor_name_only': True,
+                'qa_classification_label': '9',
+                'qa_confidence_level': 'medium',
+                'reasoning': 'Map vendor to consumable in master',
+                'action_path': '🟠 Auto w/ Flag',
+                'confidence_score': 0.60
+            })
+            return item
+
+        # Rule 11: Pre-assembled kit mentioned
+        if is_kit and has_pn:
+            item.update({
+                'kit_available': True,
+                'is_consumable': True,
+                'qa_classification_label': '11',
+                'qa_confidence_level': 'medium',
+                'reasoning': 'Expand kit BOM',
+                'action_path': '🟠 Auto w/ Flag',
+                'confidence_score': 0.55
+            })
+            return item
+            
+        # Rule 12: Work Instruction mentions Consumable/Jigs/Tools only
+        if not has_pn and has_name and has_qty:
+            item.update({
+                'is_consumable': True,
+                'qa_classification_label': '12',
+                'qa_confidence_level': 'medium',
+                'reasoning': 'Merge WI with QC steps',
+                'action_path': '🟠 Auto w/ Flag',
+                'confidence_score': 0.65
+            })
+            return item
+
+        # --- Low Confidence Rules ---
+        
+        # Rule 4: Consumable/Jigs/Tools (no Part Number)
+        if not has_pn and name_match_in_master:
+            item.update({
+                'is_consumable': True,
+                'qa_classification_label': '4',
+                'qa_confidence_level': 'low',
+                'reasoning': 'Check for text match in master data',
+                'action_path': '🔴 Human Intervention Required',
+                'confidence_score': 0.40
+            })
+            return item
+
+        # Rule 6: Consumable/Jigs/Tools + Part Number mismatch
+        if has_pn and has_name and not pn_match_in_master:
+            item.update({
+                'pn_mismatch': True,
+                'is_consumable': True,
+                'qa_classification_label': '6',
+                'qa_confidence_level': 'low',
+                'reasoning': 'Compare QC vs BOM & Master Data',
+                'action_path': '🔴 Human Intervention Required',
+                'confidence_score': 0.30
+            })
+            return item
+
+        # Rule 7: Consumable/Jigs/Tools + Obsolete Part Number
+        if _is_part_number_obsolete(item.get('part_number', '')) and has_name:
+            item.update({
+                'obsolete_pn': True,
+                'is_consumable': True,
+                'qa_classification_label': '7',
+                'qa_confidence_level': 'low',
+                'reasoning': 'Cross-check active/inactive status',
+                'action_path': '🔴 Human Intervention Required',
+                'confidence_score': 0.20
+            })
+            return item
+
+        # Rule 8: Ambiguous Consumable/Jigs/Tools Name
+        if _is_name_ambiguous(item.get('material_name', '')):
+            item.update({
+                'name_mismatch': True,
+                'qa_classification_label': '8',
+                'qa_confidence_level': 'low',
+                'reasoning': 'NLP ambiguity score high',
+                'action_path': '🔴 Human Intervention Required',
+                'confidence_score': 0.35
+            })
+            return item
+
+        # Rule 10: Multiple Consumable/Jigs/Tools, no mapping
+        # NOTE: This is an edge case best handled by LLM extraction logic.
+        # If the LLM returns an array of items, this rule applies.
+        if item.get('multiple_references', False):
+            item.update({
+                'qa_classification_label': '10',
+                'qa_confidence_level': 'low',
+                'reasoning': 'Detect multiple material refs',
+                'action_path': '🔴 Human Intervention Required',
+                'confidence_score': 0.10
+            })
+            return item
+
+        # Rule 13: Vendor + Kit Mentioned (no PN)
+        if has_vendor and is_kit and not has_pn:
+            item.update({
+                'qa_classification_label': '13',
+                'qa_confidence_level': 'low',
+                'reasoning': 'Map vendor, expand kit BOM',
+                'action_path': '🔴 Human Intervention Required',
+                'confidence_score': 0.25
+            })
+            return item
+
+        # Rule 5: No Consumable/Jigs/Tools Mentioned (Default catch-all)
+        # This is the base case for all items that do not meet any other criteria.
+        item.update({
+            'is_consumable': False,
+            'qa_classification_label': '5',
+            'qa_confidence_level': 'low',
+            'reasoning': 'No match found',
+            'action_path': '🔴 Human Intervention Required',
+            'confidence_score': 0.0
+        })
+        
+        return item
+
+    def _extract_and_classify_items(self, wi_content: str, item_master_items: list):
+        """
+        Orchestrates the extraction, enrichment, and classification of items
+        from the translated document.
+        """
+        classified_items = []
+        raw_items = self.gemini_service.extract_all_items(wi_content)
+        
+        for item in raw_items:
+            # First, classify the raw item using the new logic
+            if isinstance(item, dict):
+                classified_item = self._apply_classification_logic(item, item_master_items)
+                classified_items.append(classified_item)
+            else:
+                logging.error(f"Skipping item due to invalid format: {item}")
+            
+        return classified_items
+    
+    def _process_workflow_async(self, workflow_id, wi_path, item_path, comparison_mode):
+        """
+        The main asynchronous workflow execution loop.
+        """
+        try:
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'processing', progress=10, 
+                stage='extracting', message='Extracting data from documents'
+            )
+            
+            wi_content = self.doc_parser.extract_text(wi_path)
+            item_master_items = self.doc_parser.parse_item_master(item_path, self.gemini_service) if item_path else []
+            
+            logging.info(f"Workflow {workflow_id}: Document content extracted.")
+            logging.info(f"Extracted WI Content:\n{wi_content}")
+            logging.info(f"Extracted Item Master Content:\n{item_master_items}")
+
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'processing', progress=30, 
+                stage='translating', message='Translating document to English'
+            )
+            
+            translated_wi_content = self.translation_service.translate_to_english(wi_content)
+            logging.info(f"Workflow {workflow_id}: Document translated. Logged to results.")
+            logging.info(f"Translated Content:\n{translated_wi_content}")
+
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'processing', progress=50, 
+                stage='classifying', message='Classifying and matching items with Gemini'
+            )
+
+            # Pass the extracted and standardized item master data to the classification logic
+            extracted_items = self._extract_and_classify_items(translated_wi_content, item_master_items)
+            
+            logging.info(f"Workflow {workflow_id}: Gemini agent completed. Extracted {len(extracted_items)} items.")
+            logging.info(f"Extracted Items:\n{extracted_items}")
+            
+            summary = self._generate_summary(extracted_items, comparison_mode)
+            self._save_workflow_results(workflow_id, extracted_items, summary)
+            self._create_pending_approvals(workflow_id, extracted_items)
+            
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'completed', progress=100, 
+                stage='completed', message='Processing completed successfully'
+            )
+            
+        except Exception as e:
+            WorkflowModel.update_workflow_status(
+                workflow_id, 'error', message=f'Processing failed: {str(e)}'
+            )
+            logging.error(f"Workflow {workflow_id} failed with error: {e}")
+
+    def _extract_text_from_document(self, file_path):
+        return self.doc_parser.extract_text(file_path)
+
+    def _extract_text_from_excel(self, file_path):
+        return self.doc_parser.extract_text(file_path)
+
+    def _generate_summary(self, items, comparison_mode):
+        if not isinstance(items, list):
+            return {
+                'total_materials': 0,
+                'successful_matches': 0,
+                'knowledge_base_matches': 0,
+                'comparison_mode': comparison_mode
+            }
+        
+        total_materials = len(items)
+        successful_matches = sum(1 for item in items if isinstance(item, dict) and item.get('qa_confidence_level') in ['high', 'medium'])
+        knowledge_base_matches = sum(1 for item in items if isinstance(item, dict) and 'knowledge_base' in item.get('reasoning', '').lower())
+        
+        return {
+            'total_materials': total_materials,
+            'successful_matches': successful_matches,
+            'knowledge_base_matches': knowledge_base_matches,
+                'comparison_mode': comparison_mode
+        }
+
+    def _save_workflow_results(self, workflow_id, results, summary):
+        results_file = os.path.join(self.results_dir, f'{workflow_id}.json')
+        with open(results_file, 'w') as f:
+            json.dump({'matches': results, 'summary': summary}, f, indent=2)
+        
+        from models import get_db_connection
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO workflow_results (workflow_id, results_data, summary_data)
+            VALUES (?, ?, ?)
+        ''', (workflow_id, json.dumps({'matches': results}), json.dumps(summary)))
+        conn.commit()
+        conn.close()
+    
+    def _create_pending_approvals(self, workflow_id, matches):
+        for match in matches:
+            if isinstance(match, dict) and match.get('qa_confidence_level') in ['high', 'medium', 'low']:
+                PendingApprovalModel.add_pending_item(workflow_id, json.dumps(match))
+    
+    def get_workflow_status(self, workflow_id):
+        workflow = WorkflowModel.get_workflow(workflow_id)
+        if not workflow:
+            raise ValueError("Workflow not found")
+        return workflow
+    
+    def get_workflow_results(self, workflow_id):
+        results_file = os.path.join(self.results_dir, f'{workflow_id}.json')
+        if not os.path.exists(results_file):
+            raise ValueError("Results not found")
+        
+        with open(results_file, 'r') as f:
+            return json.load(f)
+    
+    def get_all_workflows(self):
+        workflows = WorkflowModel.get_all_workflows()
+        
+        for workflow in workflows:
+            results_file = os.path.join(self.results_dir, f"{workflow['id']}.json")
+            workflow['has_results'] = os.path.exists(results_file)
+        
+        return workflows
+</file>
+
+<file path="backend/main_backup.py">
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import json
+import uuid
+from typing import Optional
+
+from services.workflow_service import WorkflowService
+from services.knowledge_base_service import KnowledgeBaseService
+
+app = FastAPI(
+    title="BOM Platform API",
+    description="Backend API for the autonomous BOM processing platform with Gemini integration.",
+    version="4.0.0",
+)
+
+# Configure CORS
+origins = ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize services
+workflow_service = WorkflowService()
+kb_service = KnowledgeBaseService()
+
+@app.on_event("startup")
+async def startup_event():
+    """Initializes the database and creates directories on startup."""
+    try:
+        from models import init_db
+        init_db()
+        os.makedirs(workflow_service.upload_dir, exist_ok=True)
+        os.makedirs(workflow_service.results_dir, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server startup failed: {e}")
+
+@app.get("/api/workflows")
+async def get_workflows():
+    """Get all workflows from the database."""
+    try:
+        workflows = workflow_service.get_all_workflows()
+        return JSONResponse(content={'success': True, 'workflows': workflows})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/knowledge-base")
+async def get_knowledge_base(search: Optional[str] = "", limit: int = 50):
+    """Get knowledge base items with statistics, with optional search."""
+    try:
+        items = kb_service.get_items(search, limit)
+        stats = kb_service.get_stats()
+        return JSONResponse(content={'success': True, 'items': items, 'stats': stats})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/knowledge-base/pending")
+async def get_pending_approvals():
+    """Get pending items for approval."""
+    try:
+        pending_items = kb_service.get_pending_approvals()
+        return JSONResponse(content={'success': True, 'pending_items': pending_items})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/knowledge-base/approve")
+async def approve_knowledge_base_item(workflow_id: str, item_ids: list[int]):
+    """Approve an item for the knowledge base."""
+    try:
+        result = kb_service.approve_items(workflow_id, item_ids)
+        return JSONResponse(content={'success': True, 'approved_count': result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/knowledge-base/reject")
+async def reject_knowledge_base_item(workflow_id: str, item_ids: list[int]):
+    """Reject an item from the knowledge base."""
+    try:
+        result = kb_service.reject_items(workflow_id, item_ids)
+        return JSONResponse(content={'success': True, 'rejected_count': result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/autonomous/upload")
+async def upload_documents(
+    wi_document: UploadFile = File(..., description="The Japanese WI/QC document to process."),
+    item_master: Optional[UploadFile] = File(None, description="Optional Item Master for full comparison mode."),
+    comparison_mode: str = Form(..., description="'full' or 'kb_only'")
+):
+    """Enhanced upload endpoint with optional Item Master and Gemini processing."""
+    try:
+        if not wi_document:
+            raise HTTPException(status_code=400, detail="WI document is required")
+
+        if comparison_mode == 'full' and not item_master:
+            raise HTTPException(status_code=400, detail="Item Master is required for full comparison mode")
+
+        workflow_id = str(uuid.uuid4())
+
+        # Start processing asynchronously
+        workflow_service.start_workflow(
+            workflow_id=workflow_id,
+            wi_document=wi_document,
+            item_master=item_master,
+            comparison_mode=comparison_mode
+        )
+
+        return JSONResponse(content={
+            'success': True,
+            'workflow_id': workflow_id,
+            'message': 'Processing started successfully'
+        })
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start workflow: {str(e)}")
+
+@app.get("/api/autonomous/workflow/{workflow_id}/status")
+async def get_workflow_status(workflow_id: str):
+    """Get workflow status."""
+    try:
+        status = workflow_service.get_workflow_status(workflow_id)
+        return JSONResponse(content=status)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Workflow not found: {str(e)}")
+
+@app.get("/api/autonomous/workflow/{workflow_id}/results")
+async def get_workflow_results(workflow_id: str):
+    """Get workflow results."""
+    try:
+        results = workflow_service.get_workflow_results(workflow_id)
+        return JSONResponse(content=results)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Results not found: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+</file>
+
+<file path="backend/main.py">
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import json
+import uuid
+from typing import Optional
+
+from services.workflow_service import WorkflowService
+from services.knowledge_base_service import KnowledgeBaseService
+from models import ItemApprovalRequest
+
+app = FastAPI(
+    title="BOM Platform API",
+    description="Backend API for the autonomous BOM processing platform with Gemini integration.",
+    version="4.0.0",
+)
+
+# Configure CORS
+origins = ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize services
+workflow_service = WorkflowService()
+kb_service = KnowledgeBaseService()
+
+@app.on_event("startup")
+async def startup_event():
+    """Initializes the database and creates directories on startup."""
+    try:
+        from models import init_db
+        init_db()
+        os.makedirs(workflow_service.upload_dir, exist_ok=True)
+        os.makedirs(workflow_service.results_dir, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server startup failed: {e}")
+
+@app.get("/api/workflows")
+async def get_workflows():
+    """Get all workflows from the database."""
+    try:
+        workflows = workflow_service.get_all_workflows()
+        return JSONResponse(content={'success': True, 'workflows': workflows})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/knowledge-base")
+async def get_knowledge_base(search: Optional[str] = "", limit: int = 50):
+    """Get knowledge base items with statistics, with optional search."""
+    try:
+        items = kb_service.get_items(search, limit)
+        stats = kb_service.get_stats()
+        return JSONResponse(content={'success': True, 'items': items, 'stats': stats})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/knowledge-base/pending")
+async def get_pending_approvals():
+    """Get pending items for approval."""
+    try:
+        pending_items = kb_service.get_pending_approvals()
+        return JSONResponse(content={'success': True, 'pending_items': pending_items})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/knowledge-base/approve")
+async def approve_knowledge_base_item(workflow_id: str, request: ItemApprovalRequest):
+    """Approve an item for the knowledge base."""
+    try:
+        result = kb_service.approve_items(workflow_id, request.item_ids)
+        return JSONResponse(content={'success': True, 'approved_count': result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/knowledge-base/reject")
+async def reject_knowledge_base_item(workflow_id: str, request: ItemApprovalRequest):
+    """Reject an item from the knowledge base."""
+    try:
+        result = kb_service.reject_items(workflow_id, request.item_ids)
+        return JSONResponse(content={'success': True, 'rejected_count': result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/autonomous/upload")
+async def upload_documents(
+    wi_document: UploadFile = File(..., description="The Japanese WI/QC document to process."),
+    item_master: Optional[UploadFile] = File(None, description="Optional Item Master for full comparison mode."),
+    comparison_mode: str = Form(..., description="'full' or 'kb_only'")
+):
+    """Enhanced upload endpoint with optional Item Master and Gemini processing."""
+    try:
+        if not wi_document:
+            raise HTTPException(status_code=400, detail="WI document is required")
+
+        if comparison_mode == 'full' and not item_master:
+            raise HTTPException(status_code=400, detail="Item Master is required for full comparison mode")
+
+        workflow_id = str(uuid.uuid4())
+
+        # Start processing asynchronously
+        workflow_service.start_workflow(
+            workflow_id=workflow_id,
+            wi_document=wi_document,
+            item_master=item_master,
+            comparison_mode=comparison_mode
+        )
+
+        return JSONResponse(content={
+            'success': True,
+            'workflow_id': workflow_id,
+            'message': 'Processing started successfully'
+        })
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start workflow: {str(e)}")
+
+@app.get("/api/autonomous/workflow/{workflow_id}/status")
+async def get_workflow_status(workflow_id: str):
+    """Get workflow status."""
+    try:
+        status = workflow_service.get_workflow_status(workflow_id)
+        return JSONResponse(content=status)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Workflow not found: {str(e)}")
+
+@app.get("/api/autonomous/workflow/{workflow_id}/results")
+async def get_workflow_results(workflow_id: str):
+    """Get workflow results."""
+    try:
+        results = workflow_service.get_workflow_results(workflow_id)
+        return JSONResponse(content=results)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Results not found: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+</file>
+
+<file path="backend/models_backup.py">
+import sqlite3
+import os
+import json
+from datetime import datetime
+
+DB_PATH = 'bom_platform.db'
+
+def get_db_connection():
+    """Get database connection"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    """Initialize database with all tables"""
+    conn = get_db_connection()
+    
+    # Workflows table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            comparison_mode TEXT NOT NULL DEFAULT 'full',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            progress INTEGER DEFAULT 0,
+            current_stage TEXT,
+            message TEXT,
+            wi_document_path TEXT,
+            item_master_path TEXT
+        )
+    ''')
+    
+    # Knowledge base table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_name TEXT NOT NULL,
+            part_number TEXT,
+            description TEXT,
+            classification_label INTEGER,
+            confidence_level TEXT,
+            supplier_info TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            workflow_id TEXT,
+            approved_by TEXT,
+            approved_at TIMESTAMP,
+            metadata TEXT
+        )
+    ''')
+    
+    # Pending approvals table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pending_approvals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id TEXT NOT NULL,
+            item_data TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed_by TEXT,
+            reviewed_at TIMESTAMP,
+            review_notes TEXT
+        )
+    ''')
+    
+    # Workflow results table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS workflow_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id TEXT NOT NULL,
+            results_data TEXT NOT NULL,
+            summary_data TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+class WorkflowModel:
+    @staticmethod
+    def create_workflow(workflow_id, comparison_mode='full', wi_path=None, item_path=None):
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO workflows (id, comparison_mode, wi_document_path, item_master_path)
+            VALUES (?, ?, ?, ?)
+        ''', (workflow_id, comparison_mode, wi_path, item_path))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def update_workflow_status(workflow_id, status, progress=None, stage=None, message=None):
+        conn = get_db_connection()
+        updates = ['status = ?', 'updated_at = CURRENT_TIMESTAMP']
+        values = [status]
+        
+        if progress is not None:
+            updates.append('progress = ?')
+            values.append(progress)
+        if stage:
+            updates.append('current_stage = ?')
+            values.append(stage)
+        if message:
+            updates.append('message = ?')
+            values.append(message)
+        
+        values.append(workflow_id)
+        
+        conn.execute(f'''
+            UPDATE workflows SET {', '.join(updates)}
+            WHERE id = ?
+        ''', values)
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def get_workflow(workflow_id):
+        conn = get_db_connection()
+        workflow = conn.execute('''
+            SELECT * FROM workflows WHERE id = ?
+        ''', (workflow_id,)).fetchone()
+        conn.close()
+        return dict(workflow) if workflow else None
+    
+    @staticmethod
+    def get_all_workflows(limit=50):
+        conn = get_db_connection()
+        workflows = conn.execute('''
+            SELECT * FROM workflows 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        ''', (limit,)).fetchall()
+        conn.close()
+        return [dict(w) for w in workflows]
+    
+class KnowledgeBaseModel:
+    @staticmethod
+    def add_item(material_name, part_number=None, description=None, 
+                classification_label=None, confidence_level=None, 
+                supplier_info=None, workflow_id=None, approved_by=None, metadata=None):
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO knowledge_base 
+            (material_name, part_number, description, classification_label, 
+             confidence_level, supplier_info, workflow_id, approved_by, 
+             approved_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ''', (material_name, part_number, description, classification_label,
+              confidence_level, supplier_info, workflow_id, approved_by, metadata))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def search_items(query='', limit=50):
+        conn = get_db_connection()
+        if query:
+            items = conn.execute('''
+                SELECT * FROM knowledge_base 
+                WHERE material_name LIKE ? OR part_number LIKE ? OR description LIKE ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (f'%{query}%', f'%{query}%', f'%{query}%', limit)).fetchall()
+        else:
+            items = conn.execute('''
+                SELECT * FROM knowledge_base 
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (limit,)).fetchall()
+        conn.close()
+        return [dict(item) for item in items]
+    
+    @staticmethod
+    def get_stats():
+        conn = get_db_connection()
+        total_items = conn.execute('SELECT COUNT(*) as count FROM knowledge_base').fetchone()['count']
+        total_workflows = conn.execute('''
+            SELECT COUNT(DISTINCT workflow_id) as count FROM knowledge_base 
+            WHERE workflow_id IS NOT NULL
+        ''').fetchone()['count']
+        total_matches = total_items
+        high_confidence_items = conn.execute('''
+            SELECT COUNT(*) as count FROM knowledge_base 
+            WHERE confidence_level = 'high'
+        ''').fetchone()['count']
+        
+        match_rate = (high_confidence_items / total_items * 100) if total_items > 0 else 0
+        conn.close()
+        
+        return {
+            'total_items': total_items,
+            'total_workflows': total_workflows,
+            'total_matches': total_matches,
+            'match_rate': round(match_rate, 1)
+        }
+
+class PendingApprovalModel:
+    @staticmethod
+    def add_pending_item(workflow_id, item_data):
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO pending_approvals (workflow_id, item_data)
+            VALUES (?, ?)
+        ''', (workflow_id, item_data))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def get_pending_items(workflow_id=None):
+        conn = get_db_connection()
+        if workflow_id:
+            items = conn.execute('''
+                SELECT * FROM pending_approvals 
+                WHERE workflow_id = ? AND status = 'pending'
+                ORDER BY created_at DESC
+            ''', (workflow_id,)).fetchall()
+        else:
+            items = conn.execute('''
+                SELECT * FROM pending_approvals 
+                WHERE status = 'pending'
+                ORDER BY created_at DESC
+            ''').fetchall()
+        conn.close()
+        return [dict(item) for item in items]
+    
+    @staticmethod
+    def update_approval_status(item_ids, status, reviewer=None, notes=None):
+        conn = get_db_connection()
+        placeholders = ','.join(['?' for _ in item_ids])
+        conn.execute(f'''
+            UPDATE pending_approvals 
+            SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ?
+            WHERE id IN ({placeholders})
+        ''', [status, reviewer, notes] + item_ids)
+        conn.commit()
+        conn.close()
+</file>
+
+<file path="backend/models.py">
+import sqlite3
+import os
+import json
+from datetime import datetime
+from pydantic import BaseModel
+from typing import List
+
+DB_PATH = 'bom_platform.db'
+
+def get_db_connection():
+    """Get database connection"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    """Initialize database with all tables"""
+    conn = get_db_connection()
+    
+    # Workflows table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            comparison_mode TEXT NOT NULL DEFAULT 'full',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            progress INTEGER DEFAULT 0,
+            current_stage TEXT,
+            message TEXT,
+            wi_document_path TEXT,
+            item_master_path TEXT
+        )
+    ''')
+    
+    # Knowledge base table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_name TEXT NOT NULL,
+            part_number TEXT,
+            description TEXT,
+            classification_label INTEGER,
+            confidence_level TEXT,
+            supplier_info TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            workflow_id TEXT,
+            approved_by TEXT,
+            approved_at TIMESTAMP,
+            metadata TEXT
+        )
+    ''')
+    
+    # Pending approvals table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pending_approvals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id TEXT NOT NULL,
+            item_data TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed_by TEXT,
+            reviewed_at TIMESTAMP,
+            review_notes TEXT
+        )
+    ''')
+    
+    # Workflow results table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS workflow_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_id TEXT NOT NULL,
+            results_data TEXT NOT NULL,
+            summary_data TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Pydantic models for API request bodies
+class ItemApprovalRequest(BaseModel):
+    item_ids: List[int]
+
+class WorkflowModel:
+    @staticmethod
+    def create_workflow(workflow_id, comparison_mode='full', wi_path=None, item_path=None):
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO workflows (id, comparison_mode, wi_document_path, item_master_path)
+            VALUES (?, ?, ?, ?)
+        ''', (workflow_id, comparison_mode, wi_path, item_path))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def update_workflow_status(workflow_id, status, progress=None, stage=None, message=None):
+        conn = get_db_connection()
+        updates = ['status = ?', 'updated_at = CURRENT_TIMESTAMP']
+        values = [status]
+        
+        if progress is not None:
+            updates.append('progress = ?')
+            values.append(progress)
+        if stage:
+            updates.append('current_stage = ?')
+            values.append(stage)
+        if message:
+            updates.append('message = ?')
+            values.append(message)
+        
+        values.append(workflow_id)
+        
+        conn.execute(f'''
+            UPDATE workflows SET {', '.join(updates)}
+            WHERE id = ?
+        ''', values)
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def get_workflow(workflow_id):
+        conn = get_db_connection()
+        workflow = conn.execute('''
+            SELECT * FROM workflows WHERE id = ?
+        ''', (workflow_id,)).fetchone()
+        conn.close()
+        return dict(workflow) if workflow else None
+    
+    @staticmethod
+    def get_all_workflows(limit=50):
+        conn = get_db_connection()
+        workflows = conn.execute('''
+            SELECT * FROM workflows 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        ''', (limit,)).fetchall()
+        conn.close()
+        return [dict(w) for w in workflows]
+    
+class KnowledgeBaseModel:
+    @staticmethod
+    def add_item(material_name, part_number=None, description=None, 
+                classification_label=None, confidence_level=None, 
+                supplier_info=None, workflow_id=None, approved_by=None, metadata=None):
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO knowledge_base 
+            (material_name, part_number, description, classification_label, 
+             confidence_level, supplier_info, workflow_id, approved_by, 
+             approved_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ''', (material_name, part_number, description, classification_label,
+              confidence_level, supplier_info, workflow_id, approved_by, metadata))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def search_items(query='', limit=50):
+        conn = get_db_connection()
+        if query:
+            items = conn.execute('''
+                SELECT * FROM knowledge_base 
+                WHERE material_name LIKE ? OR part_number LIKE ? OR description LIKE ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (f'%{query}%', f'%{query}%', f'%{query}%', limit)).fetchall()
+        else:
+            items = conn.execute('''
+                SELECT * FROM knowledge_base 
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (limit,)).fetchall()
+        conn.close()
+        return [dict(item) for item in items]
+    
+    @staticmethod
+    def get_stats():
+        conn = get_db_connection()
+        total_items = conn.execute('SELECT COUNT(*) as count FROM knowledge_base').fetchone()['count']
+        total_workflows = conn.execute('''
+            SELECT COUNT(DISTINCT workflow_id) as count FROM knowledge_base 
+            WHERE workflow_id IS NOT NULL
+        ''').fetchone()['count']
+        total_matches = total_items
+        high_confidence_items = conn.execute('''
+            SELECT COUNT(*) as count FROM knowledge_base 
+            WHERE confidence_level = 'high'
+        ''').fetchone()['count']
+        
+        match_rate = (high_confidence_items / total_items * 100) if total_items > 0 else 0
+        conn.close()
+        
+        return {
+            'total_items': total_items,
+            'total_workflows': total_workflows,
+            'total_matches': total_matches,
+            'match_rate': round(match_rate, 1)
+        }
+
+class PendingApprovalModel:
+    @staticmethod
+    def add_pending_item(workflow_id, item_data):
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO pending_approvals (workflow_id, item_data)
+            VALUES (?, ?)
+        ''', (workflow_id, item_data))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def get_pending_items(workflow_id=None):
+        conn = get_db_connection()
+        if workflow_id:
+            items = conn.execute('''
+                SELECT * FROM pending_approvals 
+                WHERE workflow_id = ? AND status = 'pending'
+                ORDER BY created_at DESC
+            ''', (workflow_id,)).fetchall()
+        else:
+            items = conn.execute('''
+                SELECT * FROM pending_approvals 
+                WHERE status = 'pending'
+                ORDER BY created_at DESC
+            ''').fetchall()
+        conn.close()
+        return [dict(item) for item in items]
+    
+    @staticmethod
+    def update_approval_status(item_ids, status, reviewer=None, notes=None):
+        conn = get_db_connection()
+        placeholders = ','.join(['?' for _ in item_ids])
+        conn.execute(f'''
+            UPDATE pending_approvals 
+            SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ?
+            WHERE id IN ({placeholders})
+        ''', [status, reviewer, notes] + item_ids)
+        conn.commit()
+        conn.close()
+</file>
+
+<file path="backend/requirements.txt">
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-dotenv==1.0.1
+google-generativeai==0.7.1
+pandas==2.2.2
+openpyxl==3.1.2
+python-multipart==0.0.9
+python-docx==1.1.0
+pypdf2==3.0.1
+</file>
+
+<file path="frontend/public/index.html">
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="BOM Platform Enhanced with FastAPI and Gemini AI"
+    />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <!--
+      The manifest.json file is used by some browsers to install the app.
+      To learn more, visit https://developers.google.com/web/fundamentals/web-app-manifest/
+    -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <!--
+      Notice the use of %PUBLIC_URL% in the tags above.
+      It will be replaced with the URL of the `public` folder during the build.
+      Only files inside the `public` folder can be referenced from the HTML.
+
+      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
+      work correctly both with client-side routing and a non-root public URL.
+      Learn how to configure a non-root public URL by running `npm run build`.
+    -->
+    <title>BOM Platform Enhanced</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <!--
+      This HTML file is a template.
+      If you open it directly in the browser, you will see an empty page.
+
+      You can add webfonts, meta tags, or analytics to this file.
+      The build step will place the bundled scripts into the <body> tag.
+
+      To begin the development, run `npm start` or `yarn start`.
+      To create a production bundle, use `npm run build` or `yarn build`.
+    -->
+  </body>
+</html>
+</file>
+
+<file path="frontend/public/index.htmlZone.Identifier">
+[ZoneTransfer]
+ZoneId=3
+</file>
+
+<file path="frontend/src/components/ui/Button.jsx">
+function Button({ 
+  children, 
+  variant = "primary", 
+  size = "md", 
+  className = "", 
+  disabled = false, 
+  ...props 
+}) {
+  const baseClasses = "inline-flex items-center font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors";
+  
+  const variants = {
+    primary: "bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500",
+    secondary: "bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500", 
+    outline: "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 focus:ring-primary-500",
+    danger: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500"
+  };
+  
+  const sizes = {
+    sm: "px-3 py-2 text-sm",
+    md: "px-4 py-2 text-sm", 
+    lg: "px-6 py-3 text-base"
+  };
+  
+  const disabledClasses = disabled ? "opacity-50 cursor-not-allowed" : "";
+  
+  return (
+    <button
+      className={`${baseClasses} ${variants[variant]} ${sizes[size]} ${disabledClasses} ${className}`}
+      disabled={disabled}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default Button;
+</file>
+
+<file path="frontend/src/components/ui/Card.jsx">
+function Card({ children, className = "", ...props }) {
+  return (
+    <div 
+      className={`bg-white shadow-sm rounded-lg border border-gray-200 ${className}`} 
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export default Card;
+</file>
+
+<file path="frontend/src/components/ui/LoadingSpinner.jsx">
+import React from 'react';
+function LoadingSpinner({ size = "md", className = "" }) {
+  const sizes = {
+    sm: "h-4 w-4",
+    md: "h-6 w-6", 
+    lg: "h-8 w-8"
+  };
+  
+  return (
+    <div 
+      className={`animate-spin rounded-full border-2 border-primary-600 border-t-transparent ${sizes[size]} ${className}`}
+    />
+  );
+}
+
+export default LoadingSpinner;
+</file>
+
+<file path="frontend/src/components/Dashboard.jsx">
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Play, CheckCircle, Database, TrendingUp, Upload } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import LoadingSpinner from '../components/ui/LoadingSpinner';
+import toast from 'react-hot-toast';
+
+function Dashboard() {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [workflows, setWorkflows] = useState([]);
+  const [stats, setStats] = useState({
+    total: 0,
+    completed: 0,
+    processing: 0,
+    success_rate: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadDashboardData();
+    // Set up polling for real-time updates
+    const interval = setInterval(loadDashboardData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      const workflowsResponse = await fetch('/api/workflows');
+      if (workflowsResponse.ok) {
+        const workflowsData = await workflowsResponse.json();
+        const workflowList = workflowsData.workflows || [];
+        setWorkflows(workflowList);
+        const totalWorkflows = workflowList.length;
+        const completedWorkflows = workflowList.filter(w => w.status === 'completed').length;
+        const processingWorkflows = workflowList.filter(w => w.status === 'processing').length;
+        const successRate = totalWorkflows > 0 ? Math.round((completedWorkflows / totalWorkflows) * 100) : 0;
+        setStats({
+          total: totalWorkflows,
+          completed: completedWorkflows,
+          processing: processingWorkflows,
+          success_rate: successRate
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+      toast.error('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    try {
+      return new Date(dateString).toLocaleDateString();
+    } catch {
+      return 'Invalid date';
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed': return 'bg-green-100 text-green-800';
+      case 'processing': return 'bg-yellow-100 text-yellow-800';
+      case 'error': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  if (loading && workflows.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <LoadingSpinner size="lg" className="mx-auto mb-4" />
+          <p className="text-gray-600">{t('common.loading')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">{t('dashboard.title')}</h1>
+          <p className="text-gray-600 mt-1">{t('dashboard.subtitle')}</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Database className="h-5 w-5 text-blue-600" />
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Total Workflows</p>
+                <p className="text-2xl font-semibold text-gray-900">{stats.total}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Completed</p>
+                <p className="text-2xl font-semibold text-gray-900">{stats.completed}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
+                  <Play className="h-5 w-5 text-yellow-600" />
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Processing</p>
+                <p className="text-2xl font-semibold text-gray-900">{stats.processing}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="h-5 w-5 text-purple-600" />
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Success Rate</p>
+                <p className="text-2xl font-semibold text-gray-900">{stats.success_rate}%</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+        <div className="mb-8">
+          <Button onClick={() => navigate('/upload')} className="btn-primary">
+            <Upload className="h-5 w-5 mr-2" />
+            {t('dashboard.startProcessing')}
+          </Button>
+        </div>
+        <Card>
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h3 className="text-lg font-medium text-gray-900">Recent Workflows</h3>
+          </div>
+          <div className="p-6">
+            {workflows.length > 0 ? (
+              <div className="space-y-4">
+                {workflows.slice(0, 10).map((workflow) => (
+                  <div
+                    key={workflow.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-gray-900">
+                          {workflow.id.substring(0, 8)}...
+                        </h4>
+                        <span className="text-sm text-gray-500">
+                          {formatDate(workflow.created_at)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center space-x-4">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                            workflow.status
+                          )}`}
+                        >
+                          {workflow.status}
+                        </span>
+                        <span className="text-sm text-gray-500">
+                          Mode: {workflow.comparison_mode || 'full'}
+                        </span>
+                        {workflow.progress && (
+                          <span className="text-sm text-gray-500">
+                            {workflow.progress}%
+                          </span>
+                        )}
+                      </div>
+                      {workflow.message && (
+                        <p className="text-sm text-gray-600 mt-1">{workflow.message}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-2 ml-4">
+                      {workflow.status === 'completed' && workflow.has_results && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/results/${workflow.id}`)}
+                        >
+                          View Results
+                        </Button>
+                      )}
+                      {workflow.status === 'processing' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/processing/${workflow.id}`)}
+                        >
+                          View Status
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Database className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No workflows yet</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Start by uploading your first document.
+                </p>
+                <div className="mt-6">
+                  <Button onClick={() => navigate('/upload')}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Start Processing
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export default Dashboard;
+</file>
+
+<file path="frontend/src/components/KnowledgeBase.jsx">
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Database, Search, CheckCircle, Clock, Eye } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import Card from './ui/Card';
+import Button from './ui/Button';
+import LoadingSpinner from './ui/LoadingSpinner';
+import { TranslationService } from '../services/TranslationService';
+
+function KnowledgeBasePage() {
+  const navigate = useNavigate();
+  const { t, currentLanguage } = useTranslation();
+  const [items, setItems] = useState([]);
+  const [stats, setStats] = useState({
+    total_items: 0,
+    total_workflows: 0,
+    total_matches: 0,
+    match_rate: 0
+  });
+  const [pendingItems, setPendingItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('items');
+
+  const loadKnowledgeBaseData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (searchQuery) params.append('search', searchQuery);
+      params.append('limit', '50');
+      const response = await fetch(`/api/knowledge-base?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('API response for knowledge base:', data); // Debugging log
+        setItems(data.items || []);
+        setStats(data.stats || stats);
+      }
+    } catch (error) {
+      console.error('Failed to load knowledge base data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery]);
+
+  const loadPendingApprovals = useCallback(async () => {
+    try {
+      const response = await fetch('/api/knowledge-base/pending');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('API response for pending approvals:', data); // Debugging log
+        setPendingItems(data.pending_items || []);
+      }
+    } catch (error) {
+      console.error('Failed to load pending approvals:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadKnowledgeBaseData();
+    loadPendingApprovals();
+    
+    // Set up polling to refresh data every 10 seconds
+    const intervalId = setInterval(() => {
+      loadKnowledgeBaseData();
+      loadPendingApprovals();
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(intervalId);
+  }, [loadKnowledgeBaseData, loadPendingApprovals]);
+
+  const handleSearch = (e) => {
+    setSearchQuery(e.target.value);
+  };
+
+  const formatDate = (dateString) => {
+    try {
+      return new Date(dateString).toLocaleDateString(
+        currentLanguage === 'ja' ? 'ja-JP' : 'en-US'
+      );
+    } catch {
+      return 'Invalid date';
+    }
+  };
+
+  const formatNumber = (num) => {
+    if (num == null || isNaN(num)) return '0';
+    const locale = currentLanguage === 'ja' ? 'ja-JP' : 'en-US';
+    return new Intl.NumberFormat(locale).format(num);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="mb-8">
+          <button onClick={() => navigate('/dashboard')} className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            {t('common.back')} {t('common.to')} {t('navigation.dashboard')}
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">{t('knowledgeBase.title')}</h1>
+          <p className="text-gray-600 mt-1">{t('knowledgeBase.subtitle')}</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Card className="p-6">
+            <div className="flex items-center">
+              <Database className="h-8 w-8 text-blue-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('knowledgeBase.totalItems')}</p>
+                <p className="text-2xl font-semibold text-gray-900">{formatNumber(stats.total_items)}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="h-8 w-8 bg-green-100 rounded-lg flex items-center justify-center">
+                <span className="text-green-600 font-semibold">📋</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('knowledgeBase.totalWorkflows')}</p>
+                <p className="text-2xl font-semibold text-gray-900">{formatNumber(stats.total_workflows)}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="h-8 w-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                <span className="text-purple-600 font-semibold">🔗</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('knowledgeBase.totalMatches')}</p>
+                <p className="text-2xl font-semibold text-gray-900">{formatNumber(stats.total_matches)}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="h-8 w-8 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <span className="text-yellow-600 font-semibold">📊</span>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('knowledgeBase.matchRate')}</p>
+                <p className="text-2xl font-semibold text-gray-900">{stats.match_rate}%</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+        <div className="border-b border-gray-200 mb-6">
+          <nav className="-mb-px flex space-x-8">
+            <button onClick={() => setActiveTab('items')} className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'items'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}>
+              <Database className="h-4 w-4 inline mr-2" />
+              {t('knowledgeBase.title')} ({formatNumber(stats.total_items)})
+            </button>
+            <button onClick={() => setActiveTab('pending')} className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'pending'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}>
+              <Clock className="h-4 w-4 inline mr-2" />
+              {t('knowledgeBase.pendingApprovals')} ({formatNumber(pendingItems.length)})
+              {pendingItems.length > 0 && (
+                <span className="ml-1 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                  {pendingItems.length}
+                </span>
+              )}
+            </button>
+          </nav>
+        </div>
+        {activeTab === 'items' && (
+          <>
+            <div className="mb-6">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={handleSearch}
+                  placeholder={t('knowledgeBase.searchItems')}
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                />
+              </div>
+            </div>
+            <Card className="overflow-hidden">
+              {loading ? (
+                <div className="flex justify-center items-center py-12">
+                  <LoadingSpinner size="lg" />
+                </div>
+              ) : items.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          {t('results.columns.materialName')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          {t('results.columns.partNumber')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          {t('results.columns.classification')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          {t('results.columns.confidence')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          {t('common.created')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          {t('results.columns.supplierMatch')}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {items.map((item) => (
+                        <tr key={item.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 text-sm text-gray-900">
+                            <div className="font-medium">{item.material_name}</div>
+                            {item.description && (
+                              <div className="text-xs text-gray-500 mt-1">{item.description}</div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {item.part_number || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {item.classification_label ? (
+                              <div>
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  {TranslationService.translateClassificationLabel(item.classification_label, currentLanguage)}
+                                </span>
+                              </div>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {item.confidence_level ? (
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                item.confidence_level === 'high'
+                                  ? 'bg-green-100 text-green-800'
+                                  : item.confidence_level === 'medium'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}>
+                                {TranslationService.translateConfidenceLevel(item.confidence_level, currentLanguage)}
+                              </span>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {formatDate(item.created_at)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {item.workflow_id ? (
+                              <div>
+                                <span className="text-blue-600">Workflow</span>
+                                <div className="text-xs">{item.workflow_id.substring(0, 8)}...</div>
+                              </div>
+                            ) : (
+                              'Manual'
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Database className="mx-auto h-12 w-12 text-gray-400" />
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">{t('knowledgeBase.noItems')}</h3>
+                  <p className="mt-1 text-sm text-gray-500">{t('knowledgeBase.noItemsDescription')}</p>
+                </div>
+              )}
+            </Card>
+          </>
+        )}
+        {activeTab === 'pending' && (
+          <Card className="overflow-hidden">
+            {pendingItems.length > 0 ? (
+              <div className="p-6">
+                <div className="mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">{t('knowledgeBase.pendingApprovals')}</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    These items are waiting for approval to be added to the knowledge base.
+                    Go to the respective workflow results page to approve or reject them.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  {pendingItems.map((item) => {
+                    const data = item.parsed_data || {};
+                    return (
+                      <div key={item.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h4 className="font-medium text-gray-900">
+                              {data.qa_material_name || 'Unknown Material'}
+                            </h4>
+                            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
+                              <div>
+                                <span className="font-medium">{t('results.columns.partNumber')}:</span>
+                                <div>{data.part_number || 'N/A'}</div>
+                              </div>
+                              <div>
+                                <span className="font-medium">{t('results.columns.confidence')}:</span>
+                                <div>{Math.round((data.confidence_score || 0) * 100)}%</div>
+                              </div>
+                              <div>
+                                <span className="font-medium">{t('results.columns.classification')}:</span>
+                                <div>{TranslationService.translateClassificationLabel(data.qa_classification_label, currentLanguage)}</div>
+                              </div>
+                              <div>
+                                <span className="font-medium">{t('results.columns.supplierMatch')}:</span>
+                                <div>{TranslationService.translateMatchSource(data.match_source, currentLanguage)}</div>
+                              </div>
+                            </div>
+                            {data.reasoning && (
+                              <div className="mt-2 text-sm text-gray-600">
+                                <span className="font-medium">{t('results.columns.reason')}:</span>
+                                <p className="italic">"{data.reasoning}"</p>
+                              </div>
+                            )}
+                            <div className="mt-2 text-xs text-gray-500">
+                              Workflow: {item.workflow_id} • {t('common.created')}: {formatDate(item.created_at)}
+                            </div>
+                          </div>
+                          <div className="ml-4">
+                            <Button size="sm" variant="outline" onClick={() => navigate(`/results/${item.workflow_id}`)}>
+                              <Eye className="h-4 w-4 mr-1" />
+                              {t('knowledgeBase.review')}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <CheckCircle className="mx-auto h-12 w-12 text-green-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No Pending Approvals</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  All items have been reviewed. New items will appear here after workflow completion.
+                </p>
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default KnowledgeBasePage;
+</file>
+
+<file path="frontend/src/components/LanguageSelector.jsx">
+import React from 'react';
+import { Globe } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+
+function LanguageSelector({ className = "" }) {
+  const { currentLanguage, changeLanguage, availableLanguages } = useTranslation();
+
+  return (
+    <div className={`relative inline-block ${className}`}>
+      <select
+        value={currentLanguage}
+        onChange={(e) => changeLanguage(e.target.value)}
+        className="appearance-none bg-white border border-gray-300 rounded-md py-2 pl-3 pr-8 text-sm leading-5 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+      >
+        {availableLanguages.map((lang) => (
+          <option key={lang.code} value={lang.code}>
+            {lang.nativeName}
+          </option>
+        ))}
+      </select>
+      <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+        <Globe className="h-4 w-4 text-gray-400" />
+      </div>
+    </div>
+  );
+}
+
+export default LanguageSelector;
+</file>
+
+<file path="frontend/src/components/Layout.jsx">
+import { useLocation, Link } from 'react-router-dom';
+import { BarChart, Home, Upload, Database, Settings, Globe } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import LanguageSelector from './LanguageSelector';
+
+function Layout({ children }) {
+  const location = useLocation();
+  const { t } = useTranslation();
+
+  const navigation = [
+    { name: t('navigation.dashboard'), href: '/dashboard', icon: Home },
+    { name: t('navigation.upload'), href: '/upload', icon: Upload },
+    { name: t('knowledgeBase.title'), href: '/knowledge-base', icon: Database },
+    { name: t('settings.title'), href: '/settings', icon: Settings }
+  ];
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <nav className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex">
+              <div className="flex-shrink-0 flex items-center">
+                <BarChart className="h-8 w-8 text-primary-600" />
+                <span className="ml-2 text-xl font-bold text-gray-900">BOM Platform</span>
+                <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                  Enhanced v2.0
+                </span>
+              </div>
+              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+                {navigation.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.href;
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={`${
+                        isActive
+                          ? 'border-primary-500 text-primary-600'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      } inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium`}
+                    >
+                      <Icon className="h-4 w-4 mr-2" />
+                      {item.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex items-center">
+              <LanguageSelector className="mr-4" />
+              <div className="hidden sm:flex items-center space-x-4">
+                <span className="text-xs text-gray-500">
+                  QA Classification • Knowledge Base • Japanese Support
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </nav>
+      <main className="min-h-screen">
+        {children}
+      </main>
+    </div>
+  );
+}
+
+export default Layout;
+</file>
+
+<file path="frontend/src/components/ProcessingPage.jsx">
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, CheckCircle } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import LoadingSpinner from '../components/ui/LoadingSpinner';
+import Card from './ui/Card';
+
+function ProcessingPage() {
+  const { workflowId } = useParams();
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [workflow, setWorkflow] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const checkWorkflowStatus = async () => {
+    try {
+      const response = await fetch(`/api/autonomous/workflow/${workflowId}/status`);
+      if (response.ok) {
+        const data = await response.json();
+        setWorkflow(data);
+        
+        if (data.status === 'completed') {
+          setTimeout(() => {
+            navigate(`/results/${workflowId}`);
+          }, 1000);
+        } else if (data.status === 'error') {
+          setLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check workflow status:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (workflowId) {
+      const interval = setInterval(() => {
+        checkWorkflowStatus();
+      }, 2000);
+      
+      checkWorkflowStatus();
+      return () => clearInterval(interval);
+    }
+  }, [workflowId, navigate, checkWorkflowStatus]);
+
+  if (loading && !workflow) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <LoadingSpinner size="lg" className="mx-auto mb-4" />
+          <p className="text-gray-600">{t('common.loading')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="mb-8">
+          <button onClick={() => navigate('/dashboard')} className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Back to Dashboard
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">{t('navigation.processing')}</h1>
+          <p className="text-gray-600 mt-1">Workflow ID: {workflowId}</p>
+        </div>
+        {workflow && (
+          <Card className="p-8">
+            <div className="text-center">
+              {workflow.status === 'completed' ? (
+                <CheckCircle className="mx-auto h-16 w-16 text-green-500 mb-4" />
+              ) : workflow.status === 'error' ? (
+                <div className="mx-auto h-16 w-16 text-red-500 mb-4">❌</div>
+              ) : (
+                <LoadingSpinner size="lg" className="mx-auto mb-4" />
+              )}
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                {workflow.status === 'completed'
+                  ? 'Processing Complete!'
+                  : workflow.status === 'error'
+                  ? 'Processing Failed'
+                  : 'Processing in Progress...'
+                }
+              </h2>
+              <p className="text-gray-600 mb-6">
+                {workflow.message || 'Processing your documents...'}
+              </p>
+              <div className="bg-gray-200 rounded-full h-2 mb-4">
+                <div
+                  className="bg-primary-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${workflow.progress || 0}%` }}
+                ></div>
+              </div>
+              <p className="text-sm text-gray-500">
+                Current Stage: {workflow.current_stage || 'initializing'}
+              </p>
+              {workflow.progress && (
+                <p className="text-sm text-gray-500 mt-1">
+                  {Math.round(workflow.progress)}% Complete
+                </p>
+              )}
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default ProcessingPage;
+</file>
+
+<file path="frontend/src/components/Results.jsx">
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Download, CheckCircle, X, Database, AlertCircle } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import { TranslationService } from '../services/TranslationService';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import toast from 'react-hot-toast';
+
+// Define the base URL for the API calls.
+const BASE_URL = 'http://localhost:8000';
+
+function ResultsPage() {
+  const { workflowId } = useParams();
+  const navigate = useNavigate();
+  const { t, currentLanguage } = useTranslation();
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [pendingItems, setPendingItems] = useState([]);
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  const [showApprovalSection, setShowApprovalSection] = useState(false);
+
+  const loadResults = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/autonomous/workflow/${workflowId}/results`);
+      if (!response.ok) throw new Error('Failed to fetch results');
+      
+      const data = await response.json();
+      setResults(data);
+    } catch (error) {
+      console.error('Error fetching results:', error);
+      setError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [workflowId]);
+
+  const loadPendingApprovals = useCallback(async () => {
+    try {
+      const response = await fetch('/api/knowledge-base/pending');
+      if (response.ok) {
+        const data = await response.json();
+        const workflowPendingItems = data.pending_items?.filter(
+          item => item.workflow_id === workflowId
+        ) || [];
+        setPendingItems(workflowPendingItems);
+        setShowApprovalSection(workflowPendingItems.length > 0);
+      }
+    } catch (error) {
+      console.error('Error fetching pending approvals:', error);
+    }
+  }, [workflowId]);
+
+  useEffect(() => {
+    if (workflowId) {
+      loadResults();
+      loadPendingApprovals();
+    }
+  }, [workflowId, loadResults, loadPendingApprovals]);
+
+  const handleItemSelection = (itemId) => {
+    const newSelected = new Set(selectedItems);
+    if (newSelected.has(itemId)) {
+      newSelected.delete(itemId);
+    } else {
+      newSelected.add(itemId);
+    }
+    setSelectedItems(newSelected);
+  };
+
+  const handleApproveSelected = async () => {
+    if (selectedItems.size === 0) {
+      toast.error('Please select items to approve');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${BASE_URL}/api/knowledge-base/approve?workflow_id=${workflowId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_ids: Array.from(selectedItems).map(id => parseInt(id, 10))
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(`${data.approved_count} items approved for knowledge base`);
+        loadPendingApprovals();
+        setSelectedItems(new Set());
+      } else {
+        throw new Error('Failed to approve items');
+      }
+    } catch (error) {
+      console.error('Error approving items:', error);
+      toast.error('Failed to approve items');
+    }
+  };
+
+  const handleRejectSelected = async () => {
+    if (selectedItems.size === 0) {
+      toast.error('Please select items to reject');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${BASE_URL}/api/knowledge-base/reject?workflow_id=${workflowId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_ids: Array.from(selectedItems).map(id => parseInt(id, 10))
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(`${data.rejected_count} items rejected`);
+        loadPendingApprovals();
+        setSelectedItems(new Set());
+      } else {
+        throw new Error('Failed to reject items');
+      }
+    } catch (error) {
+      console.error('Error rejecting items:', error);
+      toast.error('Failed to reject items');
+    }
+  };
+
+  const exportResults = async () => {
+    try {
+      const exportData = {
+        workflow_id: workflowId,
+        results: results,
+        export_date: new Date().toISOString(),
+        language: currentLanguage
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: 'application/json'
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bom-results-${workflowId}-${currentLanguage}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success(t('results.resultsExported'));
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Export failed');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">{t('common.loading')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !results) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-8">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
+            >
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Back to Dashboard
+            </button>
+          </div>
+          <Card className="p-6 text-center">
+            <div className="text-red-600 mb-4">
+              <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="h-8 w-8" />
+              </div>
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Error</h3>
+            <p className="text-gray-600">Failed to load results</p>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  const matches = results.matches || [];
+  const summary = results.summary || {};
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <button
+                onClick={() => navigate('/dashboard')}
+                className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4"
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-3xl font-bold text-gray-900">{t('results.title')}</h1>
+              <p className="text-gray-600 mt-1">
+                {t('results.workflowId')}: {workflowId} • {t('results.withItemClassificationReasons')}
+              </p>
+            </div>
+            <div className="flex items-center space-x-3">
+              <Button onClick={exportResults} variant="outline">
+                <Download className="h-4 w-4 mr-2" />
+                {t('results.exportResults')}
+              </Button>
+            </div>
+          </div>
+        </div>
+        {showApprovalSection && (
+          <Card className="p-6 mb-8 border-amber-200 bg-amber-50">
+            <div className="flex items-start space-x-3">
+              <Database className="h-6 w-6 text-amber-600 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {t('knowledgeBase.pendingApprovals')}
+                </h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  {pendingItems.length} items from this workflow are pending approval to be added to the knowledge base. 
+                  Please review and approve items that should be saved for future comparisons.
+                </p>
+                
+                <div className="space-y-3 mb-4">
+                  {pendingItems.map((item) => {
+                    const data = item.parsed_data || {};
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                          selectedItems.has(item.id)
+                            ? 'bg-primary-50 border-primary-300'
+                            : 'bg-white border-gray-200 hover:border-gray-300'
+                        }`}
+                        onClick={() => handleItemSelection(item.id)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.has(item.id)}
+                                onChange={() => handleItemSelection(item.id)}
+                                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                              <h4 className="font-medium text-gray-900">
+                                {data.qa_material_name || 'Unknown Material'}
+                              </h4>
+                            </div>
+                            <div className="mt-1 ml-6 text-sm text-gray-600">
+                              <span className="mr-4">{t('results.columns.partNumber')}: {data.part_number || 'N/A'}</span>
+                              <span className="mr-4">
+                                {t('results.columns.confidence')}: {Math.round((data.confidence_score || 0) * 100)}%
+                              </span>
+                              <span>
+                                {t('results.columns.classification')}: {TranslationService.translateClassificationLabel(data.qa_classification_label, currentLanguage)}
+                              </span>
+                            </div>
+                            {data.reasoning && (
+                              <p className="mt-1 ml-6 text-sm text-gray-500 italic">
+                                "{data.reasoning}"
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <Button
+                    onClick={handleApproveSelected}
+                    disabled={selectedItems.size === 0}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Approve Selected ({selectedItems.size})
+                  </Button>
+                  <Button
+                    onClick={handleRejectSelected}
+                    disabled={selectedItems.size === 0}
+                    variant="outline"
+                    className="border-red-300 text-red-700 hover:bg-red-50"
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Reject Selected ({selectedItems.size})
+                  </Button>
+                  <Button
+                    onClick={() => setSelectedItems(new Set(pendingItems.map(item => item.id)))}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    onClick={() => setSelectedItems(new Set())}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Clear Selection
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span className="text-blue-600 font-semibold text-sm">📊</span>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('results.materialsProcessed')}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary.total_materials || 0}
+                </p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('results.successfulMatches')}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary.successful_matches || 0}
+                </p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
+                  <span className="text-yellow-600 font-semibold">📈</span>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('results.averageConfidence')}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {matches.length > 0 ? Math.round((matches.reduce((sum, m) => sum + (m.confidence_score || 0), 0) / matches.length) * 100) : 0}%
+                </p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <Database className="h-4 w-4 text-purple-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">{t('results.knowledgeBaseMatches')}</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {summary.knowledge_base_matches || 0}
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.sno')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.materialName')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.partNumber')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.classification')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.confidence')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.supplierMatch')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('results.columns.reason')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {matches.length > 0 ? (
+                  matches.map((match, index) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {index + 1}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        <div className="font-medium">{match.material_name}</div>
+                        {match.qa_excerpt && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            "{match.qa_excerpt}"
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {match.part_number || '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div className="flex items-center">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            {TranslationService.translateClassificationLabel(match.qa_classification_label, currentLanguage)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          match.qa_confidence_level === 'high' ? 'bg-green-100 text-green-800' :
+                          match.qa_confidence_level === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {TranslationService.translateConfidenceLevel(match.qa_confidence_level, currentLanguage)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {match.confidence_score > 0 ? (
+                          <div>
+                            <div className="font-medium">{match.supplier_description}</div>
+                            <div className="text-xs text-gray-500">
+                              {match.supplier_part_number} • {Math.round(match.confidence_score * 100)}%
+                            </div>
+                            <div className="text-xs text-blue-600 mt-1">
+                              {TranslationService.translateMatchSource(match.match_source, currentLanguage)}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {match.reasoning || t('results.noReasonProvided')}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-8 text-center text-gray-500">
+                      {t('results.noMaterialsMatch')}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export default ResultsPage;
+</file>
+
+<file path="frontend/src/components/SettingsPage.jsx">
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Globe } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import Card from '../components/ui/Card';
+import LanguageSelector from './LanguageSelector';
+
+function SettingsPage() {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="mb-8">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4"
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            {t('common.back')} {t('common.to')} {t('navigation.dashboard')}
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">{t('settings.title')}</h1>
+        </div>
+
+        <Card className="p-6">
+          <div className="flex items-center mb-4">
+            <Globe className="h-5 w-5 text-gray-400 mr-2" />
+            <h2 className="text-lg font-medium text-gray-900">{t('settings.language')}</h2>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t('settings.resultsLanguage')}
+              </label>
+              <p className="text-sm text-gray-500 mb-3">
+                {t('settings.resultsLanguageDescription')}
+              </p>
+              <LanguageSelector />
+            </div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export default SettingsPage;
+</file>
+
+<file path="frontend/src/components/Upload.jsx">
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Upload, File, Database, ToggleLeft, ToggleRight } from 'lucide-react';
+import { useTranslation } from '../contexts/TranslationContext';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import toast from 'react-hot-toast';
+
+function UploadPage() {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [wiDocument, setWiDocument] = useState(null);
+  const [itemMaster, setItemMaster] = useState(null);
+  const [comparisonMode, setComparisonMode] = useState('full');
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileChange = (event, type) => {
+    const file = event.target.files[0];
+    if (type === 'wi') {
+      setWiDocument(file);
+    } else {
+      setItemMaster(file);
+    }
+  };
+
+  const toggleComparisonMode = () => {
+    setComparisonMode(comparisonMode === 'full' ? 'kb_only' : 'full');
+    if (comparisonMode === 'full') {
+      setItemMaster(null);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!wiDocument) {
+      toast.error('Please select a WI document');
+      return;
+    }
+    if (comparisonMode === 'full' && !itemMaster) {
+      toast.error('Please select an Item Master for full comparison mode');
+      return;
+    }
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('wi_document', wiDocument);
+      formData.append('comparison_mode', comparisonMode);
+      
+      if (itemMaster) {
+        formData.append('item_master', itemMaster);
+      }
+      const response = await fetch('/api/autonomous/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Upload failed');
+      }
+      const data = await response.json();
+      if (data.success) {
+        toast.success('Upload successful!');
+        navigate(`/processing/${data.workflow_id}`);
+      } else {
+        throw new Error(data.message || 'Upload failed');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast.error('Upload failed: ' + error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="mb-8">
+          <button onClick={() => navigate('/dashboard')} className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Back to Dashboard
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">{t('navigation.upload')}</h1>
+          <p className="text-gray-600 mt-1">
+            Upload your Japanese WI/QC document and optionally an Item Master for autonomous processing
+          </p>
+        </div>
+        <Card className="p-6 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Comparison Mode</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Choose how to compare your WI document
+              </p>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className={`text-sm font-medium ${
+                comparisonMode === 'full' ? 'text-primary-600' : 'text-gray-500'
+              }`}>
+                Full Comparison
+              </span>
+              <button onClick={toggleComparisonMode} className="focus:outline-none">
+                {comparisonMode === 'kb_only' ? (
+                  <ToggleRight className="h-8 w-8 text-primary-600" />
+                ) : (
+                  <ToggleLeft className="h-8 w-8 text-gray-400" />
+                )}
+              </button>
+              <span className={`text-sm font-medium ${
+                comparisonMode === 'kb_only' ? 'text-primary-600' : 'text-gray-500'
+              }`}>
+                Knowledge Base Only
+              </span>
+            </div>
+          </div>
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            {comparisonMode === 'full' ? (
+              <div className="flex items-start space-x-3">
+                <File className="h-5 w-5 text-blue-500 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Full Comparison Mode</p>
+                  <p className="text-sm text-gray-600">
+                    Compare WI document against both Item Master and Knowledge Base for comprehensive matching
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start space-x-3">
+                <Database className="h-5 w-5 text-purple-500 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Knowledge Base Only Mode</p>
+                  <p className="text-sm text-gray-600">
+                    Compare WI document against historical knowledge base only - no Item Master required
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <Card className="p-6">
+            <div className="text-center">
+              <File className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                WI/QC Document *
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Supports PDF, DOCX, DOC, TXT formats
+              </p>
+              <input
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                onChange={(e) => handleFileChange(e, 'wi')}
+                className="hidden"
+                id="wi-upload"
+              />
+              <label
+                htmlFor="wi-upload"
+                className="cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Choose File
+              </label>
+              {wiDocument && (
+                <div className="mt-4">
+                  <p className="text-sm text-green-600 font-medium">Selected:</p>
+                  <p className="text-sm text-gray-700">{wiDocument.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {(wiDocument.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+              )}
+            </div>
+          </Card>
+          <Card className={`p-6 ${comparisonMode === 'kb_only' ? 'opacity-50' : ''}`}>
+            <div className="text-center">
+              <File className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Item Master {comparisonMode === 'full' ? '*' : '(Optional)'}
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                {comparisonMode === 'kb_only'
+                  ? 'Not required in Knowledge Base Only mode'
+                  : 'Supports Excel (XLSX, XLS) and CSV formats'
+                }
+              </p>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={(e) => handleFileChange(e, 'item')}
+                className="hidden"
+                id="item-upload"
+                disabled={comparisonMode === 'kb_only'}
+              />
+              <label
+                htmlFor="item-upload"
+                className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 ${
+                  comparisonMode === 'kb_only' ? 'cursor-not-allowed opacity-50' : ''
+                }`}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Choose File
+              </label>
+              {itemMaster && comparisonMode === 'full' && (
+                <div className="mt-4">
+                  <p className="text-sm text-green-600 font-medium">Selected:</p>
+                  <p className="text-sm text-gray-700">{itemMaster.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {(itemMaster.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+              )}
+              {comparisonMode === 'kb_only' && (
+                <div className="mt-4 text-xs text-gray-500">
+                  Knowledge Base Only mode selected
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+        <div className="text-center">
+          <Button
+            onClick={handleUpload}
+            disabled={!wiDocument || (comparisonMode === 'full' && !itemMaster) || uploading}
+            className="btn-primary px-8 py-3"
+            size="lg"
+          >
+            {uploading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                Processing...
+              </>
+            ) : (
+              <>
+                <Upload className="h-5 w-5 mr-2" />
+                Start Processing
+              </>
+            )}
+          </Button>
+          <div className="mt-6 max-w-2xl mx-auto">
+            <p className="text-sm text-gray-500">
+              Our autonomous agents will process your documents through translation, extraction with
+              WI/QC Item classification, and intelligent comparison stages.
+              {comparisonMode === 'kb_only'
+                ? ' Items will be compared against our knowledge base only.'
+                : ' Items will be compared against both your Item Master and our knowledge base.'
+              }
+              You can monitor progress in real-time.
+            </p>
+            {comparisonMode === 'kb_only' && (
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <div className="flex items-center">
+                  <Database className="h-4 w-4 text-blue-500 mr-2" />
+                  <p className="text-sm text-blue-700 font-medium">
+                    Knowledge Base Only Mode
+                  </p>
+                </div>
+                <p className="text-sm text-blue-600 mt-1">
+                  After processing, you'll be able to approve which items should be added to the knowledge base.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default UploadPage;
+</file>
+
+<file path="frontend/src/contexts/TranslationContext.jsx">
+import React, { createContext, useContext, useState } from 'react';
+
+const TranslationContext = createContext();
+
+const translations = {
+  en: {
+    common: {
+      loading: "Loading...",
+      error: "Error",
+      success: "Success",
+      cancel: "Cancel",
+      confirm: "Confirm",
+      save: "Save",
+      delete: "Delete",
+      edit: "Edit",
+      view: "View",
+      download: "Download",
+      upload: "Upload",
+      search: "Search",
+      filter: "Filter",
+      export: "Export",
+      back: "Back",
+      next: "Next",
+      previous: "Previous",
+      close: "Close",
+      yes: "Yes",
+      no: "No",
+      clear: "Clear",
+      actions: "Actions",
+      created: "Created",
+      to: "to"
+    },
+    navigation: {
+      dashboard: "Dashboard",
+      upload: "Upload",
+      processing: "Processing",
+      results: "Results"
+    },
+    results: {
+      title: "BOM Comparison Results",
+      workflowId: "Workflow ID",
+      withItemClassificationReasons: "With Item Classification & Reasons",
+      backToDashboard: "Back to Dashboard",
+      materialsProcessed: "Materials Processed",
+      successfulMatches: "Successful Matches",
+      averageConfidence: "Average Confidence",
+      knowledgeBaseMatches: "Knowledge Base Matches",
+      exportResults: "Export Results",
+      resultsExported: "Results exported successfully!",
+      failedToLoadResults: "The results for this workflow could not be loaded.",
+      noMaterialsMatch: "No materials match the selected filter criteria.",
+      noReasonProvided: "No reason provided",
+      columns: {
+        sno: "S.No.",
+        materialName: "Material Name",
+        qcProcess: "QC Process/WI Step",
+        consumable: "Consumable/Jigs/Tools",
+        partNumber: "Part Number",
+        qty: "Qty",
+        uom: "UoM",
+        vendor: "Vendor",
+        classification: "Classification",
+        confidence: "Confidence",
+        actionPath: "Action Path",
+        supplierMatch: "Supplier Match",
+        reason: "Reason"
+      }
+    },
+    knowledgeBase: {
+      title: "Knowledge Base",
+      subtitle: "Database of previously processed items for enhanced matching accuracy",
+      totalItems: "Total Items",
+      totalWorkflows: "Total Workflows",
+      totalMatches: "Total Matches",
+      matchRate: "Match Rate",
+      searchItems: "Search items in knowledge base...",
+      noItems: "No items found",
+      noItemsDescription: "No items match your search criteria.",
+      pendingApprovals: "Pending Approvals",
+      review: "Review"
+    },
+    dashboard: {
+      title: "Dashboard",
+      subtitle: "Monitor your autonomous BOM processing workflows with QA classification",
+      showing: "Showing",
+      of: "of",
+      startProcessing: "Start Processing"
+    },
+    settings: {
+      title: "Settings",
+      language: "Language Settings",
+      resultsLanguage: "Results Display Language",
+      resultsLanguageDescription: "Choose the language for displaying BOM comparison results",
+      knowledgeBase: "Knowledge Base Settings",
+      enableKnowledgeBase: "Enable Knowledge Base",
+      knowledgeBaseDescription: "Use historical data to improve matching accuracy",
+      clearKnowledgeBase: "Clear Knowledge Base",
+      clearKnowledgeBaseDescription: "Remove all stored historical data",
+      confirmClear: "Are you sure you want to clear all knowledge base data?"
+    }
+  },
+  ja: {
+    common: {
+      loading: "読み込み中...",
+      error: "エラー",
+      success: "成功",
+      cancel: "キャンセル",
+      confirm: "確認",
+      save: "保存",
+      delete: "削除",
+      edit: "編集",
+      view: "表示",
+      download: "ダウンロード",
+      upload: "アップロード",
+      search: "検索",
+      filter: "フィルター",
+      export: "エクスポート",
+      back: "戻る",
+      next: "次へ",
+      previous: "前へ",
+      close: "閉じる",
+      yes: "はい",
+      no: "いいえ",
+      clear: "クリア",
+      actions: "操作",
+      created: "作成日",
+      to: "から"
+    },
+    navigation: {
+      dashboard: "ダッシュボード",
+      upload: "アップロード",
+      processing: "処理中",
+      results: "結果"
+    },
+    results: {
+      title: "BOM比較結果",
+      workflowId: "ワークフローID",
+      withItemClassificationReasons: "アイテム分類と理由付き",
+      backToDashboard: "ダッシュボードに戻る",
+      materialsProcessed: "処理済み材料",
+      successfulMatches: "成功マッチ",
+      averageConfidence: "平均信頼度",
+      knowledgeBaseMatches: "知識ベースマッチ",
+      exportResults: "結果エクスポート",
+      resultsExported: "結果が正常にエクスポートされました！",
+      failedToLoadResults: "このワークフローの結果を読み込めませんでした。",
+      noMaterialsMatch: "選択されたフィルター条件に一致する材料はありません。",
+      noReasonProvided: "理由が提供されていません",
+      columns: {
+        sno: "番号",
+        materialName: "材料名",
+        qcProcess: "QCプロセス/WIステップ",
+        consumable: "消耗品/治具/工具",
+        partNumber: "部品番号",
+        qty: "数量",
+        uom: "単位",
+        vendor: "ベンダー",
+        classification: "分類",
+        confidence: "信頼度",
+        actionPath: "アクションパス",
+        supplierMatch: "サプライヤーマッチ",
+        reason: "理由"
+      }
+    },
+    knowledgeBase: {
+      title: "知識ベース",
+      subtitle: "Database of previously processed items for enhanced matching accuracy",
+      totalItems: "総アイテム数",
+      totalWorkflows: "総ワークフロー数",
+      totalMatches: "総マッチ数",
+      matchRate: "マッチ率",
+      searchItems: "知識ベース内のアイテムを検索...",
+      noItems: "アイテムが見つかりません",
+      noItemsDescription: "検索条件に一致するアイテムはありません。",
+      pendingApprovals: "承認待ち",
+      review: "確認"
+    },
+    dashboard: {
+      title: "ダッシュボード",
+      subtitle: "QA分類機能付きの自律的BOM処理ワークフローを監視",
+      showing: "表示中",
+      of: "/",
+      startProcessing: "処理開始"
+    },
+    settings: {
+      title: "設定",
+      language: "言語設定",
+      resultsLanguage: "結果表示言語",
+      resultsLanguageDescription: "BOM比較結果の表示言語を選択してください",
+      knowledgeBase: "知識ベース設定",
+      enableKnowledgeBase: "知識ベースを有効化",
+      knowledgeBaseDescription: "過去のデータを使用してマッチング精度を向上させる",
+      clearKnowledgeBase: "知識ベースをクリア",
+      clearKnowledgeBaseDescription: "保存されたすべての過去データを削除",
+      confirmClear: "すべての知識ベースデータをクリアしてもよろしいですか？"
+    }
+  }
+};
+
+export function TranslationProvider({ children }) {
+  const [currentLanguage, setCurrentLanguage] = useState('en');
+  const [loading, setLoading] = useState(false);
+
+  const contextValue = {
+    currentLanguage,
+    changeLanguage: (lang) => {
+      setCurrentLanguage(lang);
+    },
+    t: (key, fallback = key) => {
+      const keys = key.split('.');
+      let value = translations[currentLanguage];
+      for (const k of keys) {
+        value = value?.[k];
+        if (value === undefined) {
+          console.warn(`Translation key not found: ${key} for language: ${currentLanguage}`);
+          value = translations.en;
+          for (const k2 of keys) {
+            value = value?.[k2];
+            if (value === undefined) {
+              console.warn(`Default translation key not found: ${key}`);
+              return fallback;
+            }
+          }
+          break;
+        }
+      }
+      return value || fallback;
+    },
+    loading,
+    availableLanguages: [
+      { code: 'en', name: 'English', nativeName: 'English' },
+      { code: 'ja', name: 'Japanese', nativeName: '日本語' }
+    ]
+  };
+
+  return (
+    <TranslationContext.Provider value={contextValue}>
+      {children}
+    </TranslationContext.Provider>
+  );
+}
+
+export function useTranslation() {
+  const context = useContext(TranslationContext);
+  if (context === undefined) {
+    throw new Error('useTranslation must be used within a TranslationProvider');
+  }
+  return context;
+}
+</file>
+
+<file path="frontend/src/services/TranslationService.js">
+class TranslationService {
+  static translateClassificationLabel(label, language = 'en') {
+    const translations = {
+      en: {
+        1: "Direct Material - Production",
+        2: "Indirect Material - Support", 
+        3: "Tools & Equipment",
+        4: "Consumable Items",
+        5: "Other/Miscellaneous"
+      },
+      ja: {
+        1: "直接材料 - 製造",
+        2: "間接材料 - サポート",
+        3: "工具・設備", 
+        4: "消耗品",
+        5: "その他・雑項目"
+      }
+    };
+    
+    return translations[language]?.[label] || translations.en[label] || `Label ${label}`;
+  }
+
+  static translateConfidenceLevel(level, language = 'en') {
+    const translations = {
+      en: { high: "High", medium: "Medium", low: "Low" },
+      ja: { high: "高", medium: "中", low: "低" }
+    };
+    
+    return translations[language]?.[level?.toLowerCase()] || level;
+  }
+
+  static translateMatchSource(source, language = 'en') {
+    const translations = {
+      en: {
+        knowledge_base: "From Knowledge Base",
+        supplier_bom: "From Supplier BOM", 
+        hybrid: "Verified Match",
+        no_match: "No Match"
+      },
+      ja: {
+        knowledge_base: "知識ベースから",
+        supplier_bom: "サプライヤーBOMから",
+        hybrid: "検証済みマッチ", 
+        no_match: "マッチなし"
+      }
+    };
+    
+    return translations[language]?.[source] || source;
+  }
+
+  static translateBoolean(value, language = 'en') {
+    if (value == null) return '-';
+    
+    const translations = {
+      en: { true: "Yes", false: "No" },
+      ja: { true: "はい", false: "いいえ" }
+    };
+    
+    return translations[language]?.[value.toString()] || value.toString();
+  }
+
+  static translateResultItem(item, language = 'en') {
+    if (!item) return item;
+    
+    return {
+      ...item,
+      classification_description: this.translateClassificationLabel(item.qa_classification_label, language),
+      confidence_level_text: this.translateConfidenceLevel(item.qa_confidence_level, language),
+      match_source_text: this.translateMatchSource(item.match_source, language),
+      action_path: this.translateActionPath(item.qa_classification_label, language),
+      consumable_text: this.translateBoolean(item.consumable_jigs_tools, language)
+    };
+  }
+}
+
+export { TranslationService };
+</file>
+
+<file path="frontend/src/App.jsx">
+import React from 'react';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { TranslationProvider } from './contexts/TranslationContext';
+import Layout from './components/Layout';
+import Dashboard from './components/Dashboard';
+import UploadPage from './components/Upload';
+import ProcessingPage from './components/ProcessingPage';
+import ResultsPage from './components/Results';
+import KnowledgeBasePage from './components/KnowledgeBase';
+import SettingsPage from './components/SettingsPage';
+
+function App() {
+  return (
+    <TranslationProvider>
+      <HashRouter>
+        <div className="App">
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/processing/:workflowId" element={<ProcessingPage />} />
+              <Route path="/results/:workflowId" element={<ResultsPage />} />
+              <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </Layout>
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              duration: 4000,
+              style: {
+                background: '#363636',
+                color: '#fff',
+              },
+            }}
+          />
+        </div>
+      </HashRouter>
+    </TranslationProvider>
+  );
+}
+
+export default App;
+</file>
+
+<file path="frontend/src/index.css">
+@tailwind base;
+@tailwind components; 
+@tailwind utilities;
+
+:root {
+  --primary-50: #eff6ff;
+  --primary-100: #dbeafe;
+  --primary-200: #bfdbfe;
+  --primary-300: #93c5fd;
+  --primary-400: #60a5fa;
+  --primary-500: #3b82f6;
+  --primary-600: #2563eb;
+  --primary-700: #1d4ed8;
+  --primary-800: #1e40af;
+  --primary-900: #1e3a8a;
+}
+
+.btn-primary {
+  @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+</file>
+
+<file path="frontend/src/index.js">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+</file>
+
+<file path="frontend/package.json">
+{
+  "name": "bom-platform-enhanced",
+  "version": "2.0.0",
+  "private": true,
+  "dependencies": {
+    "@testing-library/jest-dom": "^5.16.4",
+    "@testing-library/react": "^13.3.0",
+    "@testing-library/user-event": "^13.5.0",
+    "lucide-react": "^0.263.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.3.0",
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "proxy": "http://localhost:8000"
+}
+</file>
+
+<file path="frontend/tailwind.config.js">
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./src/**/*.{js,jsx,ts,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: 'var(--primary-50)',
+          100: 'var(--primary-100)', 
+          200: 'var(--primary-200)',
+          300: 'var(--primary-300)',
+          400: 'var(--primary-400)',
+          500: 'var(--primary-500)',
+          600: 'var(--primary-600)',
+          700: 'var(--primary-700)',
+          800: 'var(--primary-800)',
+          900: 'var(--primary-900)',
+        },
+      },
+    },
+  },
+  plugins: [],
+}
+</file>
+
+<file path="README.md">
+# BOM Platform Enhanced v3.0
+
+A comprehensive Bill of Materials (BOM) processing platform with autonomous document processing, knowledge base management, and human intervention workflows. This version is fully integrated with the Gemini API.
+
+## New Features in v3.0
+
+### 🚀 Key Enhancements
+- **Gemini API Integration**: Replaces mock agent logic with live API calls to Google's Gemini models for document processing.
+- **FastAPI Backend**: Reconstructs the entire backend using a modern, asynchronous FastAPI framework for improved performance.
+- **Enhanced Data Orchestration**: Frontend now communicates with the real FastAPI endpoints, orchestrating data flow seamlessly.
+
+### 🔧 Technical Improvements
+- **Live API Calls**: Frontend fetches real data from the FastAPI backend, enabling actual document processing.
+- **Improved Service Layer**: Backend services are updated to handle asynchronous operations and integrate with the new Gemini agent.
+- **Simplified Frontend Logic**: Removed mock data, making the frontend a pure client for the API.
+
+## Architecture
+
+### Backend
+- **FastAPI** for a high-performance, asynchronous API
+- **Gemini API** for intelligent document processing and classification
+- **SQLite Database** with comprehensive schema
+- **Service Layer**: `WorkflowService`, `KnowledgeBaseService`, and the new `GeminiAgentService`
+- **File Management**: Upload handling and results storage
+
+### Frontend  
+- **React 18** with modern hooks
+- **React Router** for navigation
+- **Tailwind CSS** for styling
+- **Lucide React** for icons
+- **React Hot Toast** for notifications
+
+### Database Schema
+- `workflows` - Workflow tracking and status
+- `knowledge_base` - Historical processed items
+- `pending_approvals` - Items awaiting human review
+- `workflow_results` - Processed results storage
+
+## Installation
+
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- **A Gemini API Key** (set as `GEMINI_API_KEY` in a `.env` file in the `backend` directory)
+
+### Backend Setup
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python -c "from models import init_db; init_db()"
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Frontend Setup
+```bash
+cd frontend
+npm install
+npm start
+```
+
+## Usage
+
+### 1. Configure API Key
+Create a `.env` file inside the `backend` directory and add your Gemini API key:
+```dotenv
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+```
+
+### 2. Run the Application
+You will need to run the backend and frontend separately in two terminals.
+```bash
+# Terminal 1 (Backend)
+./start_backend.sh
+
+# Terminal 2 (Frontend)
+./start_frontend.sh
+```
+
+### 3. Use the Platform
+- Access the dashboard at `http://localhost:3000`.
+- Upload documents and monitor their processing in real time.
+- View detailed results and approve/reject items for the knowledge base.
+
+## API Endpoints
+
+### Workflows
+- `GET /api/workflows` - List all workflows
+- `GET /api/autonomous/workflow/{id}/status` - Get workflow status
+- `GET /api/autonomous/workflow/{id}/results` - Get workflow results
+- `POST /api/autonomous/upload` - Upload documents and start processing
+
+### Knowledge Base
+- `GET /api/knowledge-base` - Get knowledge base items with search
+- `GET /api/knowledge-base/pending` - Get pending approval items
+- `POST /api/knowledge-base/approve` - Approve items for knowledge base
+- `POST /api/knowledge-base/reject` - Reject items for knowledge base
+
+---
+## Deployment
+
+This version is designed for a full-stack deployment. You can use a process manager like Gunicorn for the backend and a static file server for the frontend.
+
+## Troubleshooting
+
+### Common Issues
+1.  **API Key Error**: Ensure `GEMINI_API_KEY` is correctly set in the `.env` file.
+2.  **`Failed to fetch`**: Verify both the backend and frontend servers are running, and check for CORS issues.
+3.  **Database not found**: Run `python -c "from models import init_db; init_db()"` in the `backend` directory.
+
+---
+## Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For issues and questions:
+- Check the troubleshooting section
+- Review application logs
+- Open an issue on GitHub
+</file>
+
+<file path="setup.sh">
+#!/bin/bash
+
+echo "🚀 Setting up BOM Platform Enhanced v3.0..."
+echo "============================================="
+
+# Colors for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_status() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_info() {
+    echo -e "${BLUE}ℹ️  $1${NC}"
+}
+
+# Check if Python is available
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD=python3
+elif command -v python &> /dev/null; then
+    PYTHON_CMD=python
+else
+    echo "❌ Python not found. Please install Python 3.8+"
+    exit 1
+fi
+
+print_info "Python found: $PYTHON_CMD"
+
+# Backend setup
+print_info "Setting up backend..."
+cd backend
+
+# Create virtual environment if it doesn't exist
+if [[ ! -d "venv" ]]; then
+    print_info "Creating virtual environment..."
+    $PYTHON_CMD -m venv venv
+fi
+
+# Activate virtual environment
+source venv/bin/activate 2>/dev/null || source venv/Scripts/activate 2>/dev/null
+
+# Install dependencies
+pip install -r requirements.txt
+print_status "Backend dependencies installed"
+
+# Create directories
+mkdir -p uploads results
+print_status "Created upload and results directories"
+
+# Initialize database
+$PYTHON_CMD -c "from models import init_db; init_db()"
+print_status "Database initialized"
+
+cd ..
+
+# Frontend setup
+print_info "Setting up frontend..."
+cd frontend
+
+# Check if Node.js is available
+if ! command -v node &> /dev/null; then
+    echo "❌ Node.js not found. Please install Node.js 16+"
+    exit 1
+fi
+
+if ! command -v npm &> /dev/null; then
+    echo "❌ npm not found. Please install npm"
+    exit 1
+fi
+
+print_status "Node.js and npm found"
+
+# Install dependencies
+npm install
+print_status "Frontend dependencies installed"
+
+cd ..
+
+# Make scripts executable
+chmod +x start_backend.sh start_frontend.sh
+
+print_status "Setup complete!"
+echo ""
+echo "🚀 To start the platform:"
+echo "  Backend:  ./start_backend.sh"
+echo "  Frontend: ./start_frontend.sh"
+echo ""
+echo "📊 Access the application:"
+echo "  Backend API: http://localhost:8000"
+echo "  Frontend: http://localhost:3000"
+</file>
+
+<file path="start_backend.sh">
+#!/bin/bash
+echo "Starting BOM Platform Backend..."
+cd backend
+source venv/bin/activate 2>/dev/null || source venv/Scripts/activate 2>/dev/null || echo "No virtual environment found"
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+</file>
+
+<file path="start_frontend.sh">
+#!/bin/bash
+echo "Starting BOM Platform Frontend..."
+cd frontend
+npm start
+</file>
+
+</files>

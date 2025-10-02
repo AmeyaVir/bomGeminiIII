@@ -1,0 +1,20 @@
+# MARS Technical Architecture
+
+## Data Sources
+- Google Analytics 4
+- Facebook Ads API
+- Salesforce CRM
+- Internal transaction database
+- Customer support tickets
+
+## Tech Stack
+- Data Pipeline: Apache Airflow
+- Data Warehouse: Snowflake
+- Analytics: Looker Studio
+- Machine Learning: Python/scikit-learn
+- API: FastAPI + PostgreSQL
+
+## Security Compliance
+- SOC 2 Type II certified
+- GDPR compliant data handling
+- Encrypted data transmission
